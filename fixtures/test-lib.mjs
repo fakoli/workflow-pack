@@ -508,7 +508,7 @@ check("read operands that expand into options are uncertain", () => {
     const c = classifyCommand(cmd, policy);
     assert.equal(c.kind, "uncertain", `${cmd}: brace/glob expansion in a read operand is unsupported`);
     const compound = classifyCommand(`kill 1; ${cmd}`, policy);
-    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
   }
   // unbalanced quoting is unsupported shell syntax
   const c2 = classifyCommand('echo "unterminated', policy);
@@ -526,6 +526,51 @@ check("executable-specific diagnosis options and positional arities", () => {
   assert.equal(c.explicitTargets.length, 0);
   assert.equal(classifyCommand("launchctl kill TERM web", policy).kind, "lifecycle");
   assert.equal(classifyCommand("kill -l 123", policy).kind, "non-lifecycle");
+});
+check("extglob and unbalanced-paren read operands are uncertain", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["rg @(--pre) custom-hook pattern file", "man @(-P) custom-hook ls", "rg +(--pre) custom-hook pattern file", "rg (unclosed pattern file"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: extglob/unbalanced-paren operand is unsupported`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+});
+check("launchctl kill target is the service, not the signal", () => {
+  const c = classifyCommand("launchctl kill TERM system/web", policy);
+  assert.equal(c.kind, "lifecycle");
+  assert.equal(c.explicitTargets.length, 1);
+  assert.equal(c.explicitTargets[0], "system/web");
+  // evidence bound to the signal does not verify
+  const signalEvidence = { classification: c, verifiedTarget: { target: "TERM", ruleId: "launchctl-kill", operation: "kill", evidence: "signal bound", resolved: true } };
+  assert.notEqual(targetConfidence(signalEvidence), "verified");
+  // extra operands beyond the exact form are uncertain
+  assert.equal(classifyCommand("launchctl kill TERM web extra", policy).kind, "uncertain");
+  assert.equal(classifyCommand("launchctl start web extra", policy).kind, "uncertain");
+  assert.equal(classifyCommand("launchctl stop web extra", policy).kind, "uncertain");
+});
+check("boolean long options do not consume operands", () => {
+  for (const cmd of ["pkill --newest node extra", "killall --newest node extra"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: --newest is boolean; the extra pattern is not hidden`);
+  }
+  assert.equal(classifyCommand("pkill --newest node", policy).kind, "lifecycle");
+});
+check("unsupported systemctl verbs are uncertain", () => {
+  for (const cmd of ["systemctl list", "systemctl info", "systemctl inspect web"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: not a supported systemctl read verb`);
+  }
+  assert.equal(classifyCommand("systemctl status foo", policy).kind, "non-lifecycle");
+});
+check("malformed command lists are uncertain", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["kill 1 &&", "kill 1 ;; echo hi", "echo hi |", "kill 1 ||"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: trailing/doubled separator is malformed list syntax`);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+  assert.equal(classifyCommand("kill 1; echo hi", policy).kind, "lifecycle");
 });
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);

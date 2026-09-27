@@ -173,7 +173,7 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
   "<!-- workflow-pack:seek-first end -->" \
   "AFTER" > "${HOME}/.pi/agent/AGENTS.md"
 if (cd "${ROOT}" && ./install.sh >"${work}/closer.log" 2>&1); then r=0; else r=1; fi
-check "indented-closer file handled (refused or replaced at the exact closer)" "$r"
+check "indented-closer file installs at the exact closer" "$r"
 # either way the result must not contain duplicate closing markers
 [[ "$(grep -c 'workflow-pack:seek-first end' "${HOME}/.pi/agent/AGENTS.md")" == "1" ]]; check "no duplicate closing markers" "$?"
 

@@ -239,13 +239,14 @@ PY
 else
   { cat "${AGENTS_MD}"; printf '\n%s\n' "${block}"; } > "${tmp_md}"
   compute_mode="append"
-  # the append path validates marker text too: an inline opener/closer
-  # mention with no exact opener is malformed — never silently appended to
+  # the append path validates marker text too: it is only for files with NO
+  # markers at all — any opener/closer mention (including an orphan or
+  # malformed closer) is malformed, never silently appended to
   python3 - "${AGENTS_MD}" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" "${BEGIN_LINE_EXACT}" <<'PY'
 import sys
 path, bm, em, exact = sys.argv[1:5]
 for line in open(path).read().split("\n"):
-    if (bm in line and line != exact) or (em in line and line.strip() != em):
+    if bm in line or em in line:
         sys.exit("install: malformed workflow-pack marker text; refusing to append — fix or remove it manually")
 PY
 fi
