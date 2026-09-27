@@ -224,8 +224,8 @@ end_idx = None
 for i, line in enumerate(lines):
     # family-based detection: ANY workflow-pack marker mention that is not
     # the exact opener or exact closer (inline mentions, malformed closer
-    # variants like 'end BROKEN' or 'end-->') is malformed
-    if "workflow-pack:seek-first" in line and line != exact and line.strip() != em:
+    # variants, INDENTED closers) is malformed — exact equality only
+    if "workflow-pack:seek-first" in line and line != exact and line != em:
         sys.exit("install: malformed workflow-pack marker text; refusing to replace — fix or remove it manually")
     if line == exact and opener_idx is None:
         opener_idx = i

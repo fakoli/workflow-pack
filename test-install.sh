@@ -172,10 +172,11 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
   "OLD-PACK-TAIL" \
   "<!-- workflow-pack:seek-first end -->" \
   "AFTER" > "${HOME}/.pi/agent/AGENTS.md"
+cp "${HOME}/.pi/agent/AGENTS.md" "${work}/closer-before.md"
 if (cd "${ROOT}" && ./install.sh >"${work}/closer.log" 2>&1); then r=0; else r=1; fi
-check "indented-closer file installs at the exact closer" "$r"
-# either way the result must not contain duplicate closing markers
-[[ "$(grep -c 'workflow-pack:seek-first end' "${HOME}/.pi/agent/AGENTS.md")" == "1" ]]; check "no duplicate closing markers" "$?"
+# an indented closer is a non-exact marker-family mention: REFUSED
+[[ "$r" == "1" ]]; check "indented closer refused" "$?"
+cmp -s "${HOME}/.pi/agent/AGENTS.md" "${work}/closer-before.md"; check "refused file byte-identical" "$?"
 
 # -- 6g. malformed orphan closers are refused on the append path (no
 # mutation; the append path is only for files with NO marker text) --

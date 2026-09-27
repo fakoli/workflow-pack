@@ -605,6 +605,28 @@ check("pkill --nslist takes a value; killall option table is accurate", () => {
   }
   assert.equal(classifyCommand("killall node", policy).kind, "lifecycle");
 });
+check("single-quoted backslash is literal in read operands", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["rg -F '\\' --pre custom-hook pattern file", "man '\\' -P custom-hook ls"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: a backslash inside single quotes is literal`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+});
+check("short-option arities: missing values and absent options", () => {
+  // -g/-t/-u consume values; the pattern is missing
+  for (const cmd of ["pkill -g 123", "pkill -t tty1", "pkill -u user", "killall -n 123", "killall -o 5m", "killall -u user"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: the option consumes a value; the target is missing`);
+  }
+  // complete positive forms
+  assert.equal(classifyCommand("pkill -g 123 node", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("killall -u user node", policy).kind, "lifecycle");
+  // options absent from installed help
+  assert.equal(classifyCommand("pkill -w node", policy).kind, "uncertain");
+  assert.equal(classifyCommand("killall -t node", policy).kind, "uncertain");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
