@@ -97,8 +97,15 @@ check("docker rm -f web → lifecycle (operation position match)", () => {
 check("systemctl kill foo → lifecycle (kill is a lifecycle verb)", () => {
   assert.equal(classifyCommand("systemctl kill foo", policy).kind, "lifecycle");
 });
-check("nohup npm run dev & → lifecycle (rule executable)", () => {
-  assert.equal(classifyCommand("nohup npm run dev &", policy).kind, "lifecycle");
+check("nohup with command-bearing operands → uncertain, launch retained", () => {
+  const c = classifyCommand("nohup npm run dev &", policy);
+  assert.equal(c.kind, "uncertain", "nohup operands are command-bearing and not explicitly supported");
+  assert.equal(c.operationCount, 1, "the launch attempt is recognized");
+  assert.equal(
+    targetConfidence({ classification: c, verifiedTarget: { target: "npm", ruleId: "raw-process-kill", operation: "nohup", evidence: "x", resolved: true } }),
+    "candidate",
+    "nohup never verifies with command-bearing operands"
+  );
 });
 check("kill -s 9 123 → lifecycle (real signal)", () => {
   assert.equal(classifyCommand("kill -s 9 123", policy).kind, "lifecycle");
@@ -324,6 +331,47 @@ check("quoted separator inside a substitution is argument text, not a command se
   const c = classifyCommand('echo $(echo "x; kill 1")', policy);
   assert.equal(c.lifecycleInside, false, "the shell executes echo; kill 1 is quoted argument text");
 });
+check("complete executable word validation: attached non-word characters are uncertain", () => {
+  for (const cmd of ['echo:custom arg', 'echo* arg', 'echo[0] arg', 'echo"x" arg']) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: the complete word is not a supported executable spelling`);
+  }
+});
+check("input redirection and quoted/tilde operands are never explicit targets", () => {
+  const vt = { target: "foo.service<input", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x", resolved: true };
+  for (const cmd of ["kill 1<input", 'systemctl restart foo.service<input', 'systemctl restart "foo.service"', "systemctl restart ~"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: redirect/quoting/expansion is unsupported`);
+    assert.equal(c.explicitTargets.length, 0, `${cmd}: no invented target identity`);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+});
+check("unknown long options on lifecycle executables are uncertain", () => {
+  for (const cmd of ["kill -unsupported 1", "systemctl --future-flag restart foo.service"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: unknown option is unsupported`);
+  }
+  // supported short flags still classify
+  assert.equal(classifyCommand("sudo pkill -f node", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("docker rm -f web", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("kill -9 123", policy).kind, "lifecycle");
+});
+check("nohup never hides unresolved execution behind verified ownership", () => {
+  const vt = { target: "npm", ruleId: "raw-process-kill", operation: "nohup", evidence: "x", resolved: true };
+  for (const cmd of ["nohup sh -c 'kill 1; kill 2'", "nohup kill 1 2"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: command-bearing operands are unsupported`);
+    assert.equal(c.operationCount, 1, "the launch attempt is recognized");
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+});
+check("read-executable long options are not silently safe", () => {
+  for (const cmd of ["date --set=2000-01-01", "rg --pre custom-hook pattern file"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: mutating/launching options are unsupported read forms`);
+  }
+  assert.equal(classifyCommand("ls -la", policy).kind, "non-lifecycle", "short option clusters remain supported read forms");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
@@ -472,10 +520,9 @@ check("sudo -u root systemctl stop x → uncertain (unresolvable passthrough fla
 check("FOO=bar kill 1 → uncertain (assignment prefix)", () => {
   assert.equal(classifyCommand("FOO=bar kill 1", policy).kind, "uncertain");
 });
-check("xargs kill < list → uncertain with lifecycleInside", () => {
+check("xargs kill < list → uncertain (unknown executable, stdin redirect)", () => {
   const c = classifyCommand("xargs kill < list", policy);
-  assert.equal(c.kind, "uncertain");
-  assert.equal(c.lifecycleInside, true);
+  assert.equal(c.kind, "uncertain", "xargs is not covered by any rule; the stdin redirect is unsupported");
 });
 check("launchctl bootout system/foo → uncertain (unsupported form)", () => {
   assert.equal(classifyCommand("launchctl bootout system/foo", policy).kind, "uncertain");

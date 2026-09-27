@@ -124,6 +124,28 @@ grep -q "rolled back" "${work}/dir-restore.log"; check "recovery summary reporte
 [[ -f "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib/TAMPERED" ]]; check "rollback restored the replaced lib DIRECTORY tree (marker intact)" "$?"
 [[ "$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md" 2>/dev/null | head -1)" != "" ]]; check "skill also restored after directory rollback" "$?"
 
+# -- 6d. asset cleanup failure does not lose the replacement registration:
+# an rm shim failing on the staged .old backup must not abort the run —
+# the swap is registered first, the cleanup warns, and the install succeeds --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-cleanup fresh install exits 0" "$?"
+REAL_RM="$(command -v rm)"
+shim2="${work}/shim-rm"; mkdir -p "${shim2}"
+cat > "${shim2}/rm" <<SHIMRM
+#!/bin/sh
+for arg in "\$@"; do
+  case "\${arg}" in
+    *.old.*) exit 1 ;;
+  esac
+done
+exec "${REAL_RM}" "\$@"
+SHIMRM
+chmod +x "${shim2}/rm"
+if (cd "${ROOT}" && PATH="${shim2}:${PATH}" ./install.sh >"${work}/cleanup.log" 2>&1); then r=0; else r=1; fi
+check "cleanup failure does not fail the install (registration precedes cleanup)" "$r"
+grep -q "could not remove staged backup" "${work}/cleanup.log"; check "cleanup failure reported" "$?"
+[[ -d "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib" ]]; check "lib replaced despite cleanup failure" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

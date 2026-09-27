@@ -118,18 +118,24 @@ in the audit rather than silently treated as confidently safe.
 best-effort by design:
 
 - Confident classifications require an explicit, complete supported
-  executable/argument grammar; verified ownership requires a completely
-  supported single form (`kind === "lifecycle"`, no nested-execution
-  structure). Uncertain classifications cap at `candidate`.
+  executable/argument grammar; verified ownership requires a single covered
+  mutation on a completely supported form (`kind === "lifecycle"`, no
+  nested-execution structure). Uncertain classifications cap at
+  `candidate`.
 - Unsupported syntax — brace/glob expansion, escaped or concatenated
-  executable words, multiple targets, redirects on mutations, indirection,
-  environment prefixes — always remains uncertain and never invents target
-  identity or a confident read-only classification.
+  executable words, unknown options, multiple targets, redirects on
+  mutations, indirection, environment prefixes — always remains uncertain
+  and never invents target identity or a confident read-only
+  classification.
 - Nested-execution detection (`lifecycleInside`) is best-effort, not
   comprehensive: wrapped commands (`sh -c`), newline-separated commands
   inside double-quoted substitutions, and deeply nested substitutions may
-  be missed while the overall classification stays uncertain (hold, never
-  allow).
+  be missed while the overall classification stays uncertain. A missed
+  nested execution follows the existing decision contract: an
+  unsupported-shape uncertain classification is allowed in enforce mode
+  unless integrity detection holds it — it is NOT an unconditional hold.
+  Closing that gap is an explicit policy change for the enforcement
+  milestone, not a property of this contract.
 
 ### 3.2 Target-confidence levels
 
