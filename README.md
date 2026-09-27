@@ -108,10 +108,12 @@ skills).
 
 ## Status
 
-Preliminary. Evidence so far: lexical lint clean, and one real fixture run
-(incident replay) where the agent proposed the managed verbs. Not yet
-evidence of repeatability or ablation — run the fixtures before/after
-toggling the installed artifacts to compare.
+Regression evidence complete (v0.1.1, 2026-09-26): all four cold-session
+fixtures PASS in a single run with transcript-level verdicts — see
+[docs/STATUS.md](docs/STATUS.md). Evidence includes executed-tool-call
+analysis: the incident case ran only discovery commands and proposed the
+managed verbs; the conflict case resolved in favor of the managed CLI,
+citing the seek-first line.
 
 ## Roadmap
 
