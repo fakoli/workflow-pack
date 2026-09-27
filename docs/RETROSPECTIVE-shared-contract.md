@@ -42,8 +42,13 @@ assets, checks syntax and diff whitespace, then runs:
 | Pure library regression suite | 181 passed |
 | Independent fixed-corpus Bash argv oracle | 35 passed |
 | Temporary-HOME installer suite | 47 passed |
-| Synthetic transcript evaluator suite | 10 passed |
+| Synthetic transcript evaluator suite | 6 passed |
 | Temporary-HOME installed drift lint | clean |
+
+The original checkout additionally ran four optional historical transcript
+replays (10 total evaluator checks). Those untracked local artifacts are not
+present in a clean worktree, so this gate reports six synthetic checks; it
+does not claim the four optional replays ran here.
 
 The oracle checks physical-line boundaries, escaped-blank comment rules,
 quote/continuation exposure of command-bearing options, CR/VT/FF/NBSP word
@@ -110,6 +115,10 @@ mistakes weakened the evidence:
   avoids that mismatch.
 - Test output was often piped through grep/tail without `pipefail`; matching
   summary output is not proof that the test process exited successfully.
+- The evaluator's reported total depended on optional, untracked historical
+  transcripts. The original checkout ran 10 checks, but a clean worktree
+  runs six; carrying the old total into the closeout initially overstated
+  reproducible evidence. The final gate output exposed the difference.
 
 Tests must assert operation count, exact target, applicable rule,
 confidence, and decision—not only classification kind. The new Bash oracle
