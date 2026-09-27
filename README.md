@@ -115,18 +115,22 @@ toggling the installed artifacts to compare.
 
 ## Roadmap
 
-- **Bounded discovery tool (read-only)** — a harness extension projecting the
-  owning product's command manifest (mutation class, confirmation gates, docs
-  anchors) as a small tool/context packet, over the existing registry rather
-  than a new free-text catalog.
-- **Shadow-mode guardrail** — observe raw lifecycle commands first; then
-  soft-deny with the managed alternative named in the deny reason; hard-deny
-  only destructive/irreversible operations; human-mediated one-shot override
-  (never a model-writable marker); JSONL audit of every decision.
-- **Feedback loop** — detected improvisation events → failure memory → pack
-  and lint updates.
-- **More runtimes** — the same manifest can drive Claude Code / Codex /
-  OpenCode adapters (skills dirs, hooks, rules).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full ordered roadmap. Headlines:
+
+- **Bounded discovery tool (read-only)** — project the owning product's
+  command manifest (mutation class, confirmation gates, docs anchors) as a
+  small tool/context packet, over the existing registry rather than a new
+  free-text catalog.
+- **Shadow-mode guardrail** — observe first; then soft-deny with the managed
+  alternative named in the deny reason; hard-deny only destructive
+  operations; human-mediated one-shot override (never a model-writable
+  marker); JSONL audit.
+- **Feedback loop** — improvisation events and denials → failure memory →
+  pack and lint updates.
+- **Fixture isolation** — sandboxed regression environment with no
+  production authority.
+- **More runtimes** — the same manifest driving Claude Code / Codex /
+  OpenCode adapters.
 
 ## Provenance
 
