@@ -645,6 +645,126 @@ check("killall undeclared shorts are uncertain", () => {
   }
   assert.equal(classifyCommand("killall node", policy).kind, "lifecycle");
 });
+// Round 16: physical bytes must survive until quote/escape boundaries are
+// known. These are command DATA only: no lifecycle command is executed.
+const round16Mutations = [
+  ["escaped space before a newline", "echo foo \\ \nkill 1"],
+  ["escaped tab before a newline", "echo foo \\\t\nkill 1"],
+  ["blank line after a continuation", "echo foo \\\n\nkill 1"],
+  ["hash after an escaped space", "echo foo\\ #literal; kill 1"],
+  ["hash after an escaped tab", "echo foo\\\t#literal; kill 1"],
+];
+const serviceOnlyEvidence = {
+  target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "synthetic service authority",
+};
+for (const [name, command] of round16Mutations) {
+  check(`round 16: ${name} retains execution, coverage, confidence, and decisions`, () => {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "lifecycle", JSON.stringify(command));
+    assert.deepEqual(c.operations, ["kill"]);
+    assert.equal(c.operationCount, 1, "the second physical command must not disappear");
+    assert.ok(c.ruleIds.includes("raw-process-kill"));
+    assert.deepEqual(c.explicitTargets, [], "a bare PID is not invented authority");
+    const confidence = targetConfidence({ classification: c });
+    assert.equal(confidence, "unknown");
+    assert.equal(decide({ classification: c, confidence, mode: "enforce", policy }).action, "ownership-hold");
+    assert.equal(decide({ classification: c, confidence, mode: "shadow", policy }).action, "log-uncertainty");
+
+    const compound = classifyCommand(`systemctl restart foo.service; ${command}`, policy);
+    assert.equal(compound.kind, "lifecycle");
+    assert.deepEqual(compound.operations, ["restart", "kill"]);
+    assert.equal(compound.operationCount, 2, "service-only evidence cannot erase the second mutation");
+    const partial = targetConfidence({ classification: compound, verifiedTarget: serviceOnlyEvidence });
+    assert.equal(partial, "candidate");
+    assert.equal(decide({ classification: compound, confidence: partial, mode: "enforce", policy }).action, "ownership-hold");
+    assert.equal(decide({ classification: compound, confidence: partial, mode: "shadow", policy }).action, "log-uncertainty");
+  });
+}
+check("round 16: comment eligibility follows shell-word state across escapes and quotes", () => {
+  for (const command of [
+    "echo \\ #literal; kill 1",         // escaped blank starts a WORD
+    "echo foo\\\n#literal; kill 1",     // continuation keeps the word open
+    "echo foo\\ \\\n#literal; kill 1", // escaped blank + continuation
+    "echo ''#literal; kill 1",          // even an empty quoted span is word content
+    "echo '\n'#literal; kill 1",        // a quoted newline is not a word boundary
+    "echo foo\r#literal; kill 1",       // CR is not a shell blank
+    "echo foo # ignored \\\nkill 1",   // a backslash in a comment does not continue it
+  ]) {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "lifecycle", JSON.stringify(command));
+    assert.deepEqual(c.operations, ["kill"], JSON.stringify(command));
+  }
+});
+check("round 16: real comment boundaries still suppress literal lifecycle text", () => {
+  for (const command of [
+    "echo foo #literal; kill 1", "echo foo\t#literal; kill 1",
+    "echo foo\\  #literal; kill 1", "echo foo\\\t\t#literal; kill 1",
+    "echo foo \\\n#literal; kill 1",
+  ]) {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "non-lifecycle", JSON.stringify(command));
+    assert.equal(c.operationCount, 0);
+    assert.equal(decide({ classification: c, confidence: "unknown", mode: "enforce", policy }).action, "allow");
+    const compound = classifyCommand(`systemctl restart foo.service; ${command}`, policy);
+    assert.equal(compound.operationCount, 1);
+    assert.equal(targetConfidence({ classification: compound, verifiedTarget: serviceOnlyEvidence }), "verified");
+  }
+  for (const command of ["echo ok;# kill 1", "echo ok&&# kill 1", "echo ok|# kill 1"]) {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.operationCount, 0, "an unquoted operator also starts a shell word");
+    assert.equal(c.lifecycleInside, false, "comment text is not execution");
+  }
+});
+check("round 16: only the escaped newline is continued, never the following blank line", () => {
+  assert.equal(classifyCommand("echo foo \\\nkill 1", policy).kind, "non-lifecycle", "one continued line is still an echo argument");
+  for (const gap of ["\n", "\n\n", " \n", "\t\n", "# comment\n"]) {
+    const command = "echo foo \\\n" + gap + "kill 1";
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "lifecycle", JSON.stringify(command));
+    assert.equal(c.operationCount, 1);
+  }
+  for (const command of ["echo 'foo\n\nkill 1'", 'echo "foo\n\nkill 1"', "echo '\\\nkill 1'"]) {
+    assert.equal(classifyCommand(command, policy).kind, "non-lifecycle", "quoted physical lines remain one operand");
+  }
+  for (const command of ["\n# comment\nkill 1\n\n", "kill 1\n\n"]) {
+    assert.equal(classifyCommand(command, policy).kind, "lifecycle", "blank/comment-only lines do not invent malformed operators");
+  }
+  for (const command of ["kill 1 &&\n\n", "kill 1 |\n# comment\n", "kill 1 ;;\necho hi"]) {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "uncertain", "blank/comment lines never repair malformed list operators");
+    assert.equal(c.lifecycleInside, true);
+    assert.equal(decide({ classification: c, confidence: "verified", mode: "enforce", policy }).action, "ownership-hold");
+  }
+});
+check("round 16: read options keep their spelling across complete continuation pairs", () => {
+  for (const command of [
+    "rg -F foo \\\n--pre custom-hook pattern file", "man ls \\\n-P custom-hook",
+    "rg -F foo -\\\n-pre custom-hook pattern file", "man ls -\\\nP custom-hook",
+  ]) {
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "uncertain", JSON.stringify(command));
+    const compound = classifyCommand(`systemctl restart foo.service; ${command}`, policy);
+    assert.equal(compound.kind, "uncertain");
+    assert.equal(compound.lifecycleInside, true);
+    assert.equal(targetConfidence({ classification: compound, verifiedTarget: serviceOnlyEvidence }), "candidate");
+    for (const confidence of ["unknown", "candidate", "verified", "stale"]) {
+      assert.equal(decide({ classification: compound, confidence, mode: "enforce", policy }).action, "ownership-hold");
+    }
+  }
+});
+check("round 16: unsupported companions retain both mutations and existing structural guards", () => {
+  for (const [, command] of round16Mutations) {
+    const c = classifyCommand(`systemctl restart foo.service; ${command}; unknown-command`, policy);
+    assert.equal(c.kind, "uncertain");
+    assert.equal(c.lifecycleInside, true);
+    assert.equal(c.operationCount, 2);
+    assert.equal(targetConfidence({ classification: c, verifiedTarget: serviceOnlyEvidence }), "candidate");
+    for (const confidence of ["unknown", "candidate", "verified", "stale"]) {
+      assert.equal(decide({ classification: c, confidence, mode: "enforce", policy }).action, "ownership-hold");
+      assert.ok(decide({ classification: c, confidence, mode: "shadow", policy }).action.startsWith("log-"), "shadow remains observational");
+    }
+  }
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
