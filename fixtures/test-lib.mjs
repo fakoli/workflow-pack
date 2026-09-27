@@ -765,6 +765,63 @@ check("round 16: unsupported companions retain both mutations and existing struc
     }
   }
 });
+// Round 17: CR/VT/FF/NBSP are literal shell-word data, never JS-trimmed.
+const round17Bytes = ["\r", "\v", "\f", "\u00a0"];
+check("round 17: non-shell whitespace in the executable position is unsupported", () => {
+  for (const ch of round17Bytes) {
+    const c = classifyCommand(`echo${ch} harmless`, policy);
+    assert.equal(c.kind, "uncertain", `echo${JSON.stringify(ch)}: the executable word retains the byte, never confidently read-only`);
+    assert.equal(c.ruleIds.length, 0);
+  }
+  // NBSP glued inside the word never splits it
+  const glued = classifyCommand("echo\u00a0harmless", policy);
+  assert.equal(glued.kind, "uncertain", "NBSP is word data, not a separator");
+  // positive control: real shell blanks still parse
+  assert.equal(classifyCommand("echo harmless", policy).kind, "non-lifecycle");
+  // prefixed compound: the altered companion must not verify the compound
+  const compound = classifyCommand("kill 1; echo\r harmless", policy);
+  assert.notEqual(
+    targetConfidence({ classification: compound, verifiedTarget: { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true } }),
+    "verified",
+    "a companion with an altered executable word must not verify the compound"
+  );
+  assert.equal(decide({ classification: compound, confidence: "candidate", mode: "enforce", policy }).action, "ownership-hold");
+  // standalone unsupported-shape uncertain: shadow logs, enforce allows
+  // without claiming protection (documented coverage boundary)
+  const standalone = classifyCommand("echo\r harmless", policy);
+  assert.equal(decide({ classification: standalone, confidence: "unknown", mode: "shadow", policy }).action, "log-uncertainty");
+  const enforce = decide({ classification: standalone, confidence: "unknown", mode: "enforce", policy });
+  assert.equal(enforce.action, "allow");
+  assert.equal(enforce.protectionClaimed, false);
+});
+check("round 17: non-shell whitespace in the verb position is unsupported", () => {
+  for (const ch of round17Bytes) {
+    const c = classifyCommand(`systemctl restart${ch} foo.service`, policy);
+    assert.equal(c.kind, "uncertain", `restart${JSON.stringify(ch)} is not a supported verb spelling`);
+    assert.equal(c.explicitTargets.length, 0, "no invented target identity");
+    assert.equal(decide({ classification: c, confidence: "unknown", mode: "shadow", policy }).action, "log-uncertainty");
+    const enforce = decide({ classification: c, confidence: "unknown", mode: "enforce", policy });
+    assert.equal(enforce.action, "allow");
+    assert.equal(enforce.protectionClaimed, false, "unsupported-shape uncertain never claims protection");
+  }
+  assert.equal(classifyCommand("systemctl restart foo.service", policy).kind, "lifecycle");
+});
+check("round 17: targets retain exact non-shell-whitespace identity", () => {
+  for (const ch of round17Bytes) {
+    const command = `systemctl restart foo.service${ch}`;
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "lifecycle", JSON.stringify(command));
+    assert.deepEqual(c.explicitTargets, [`foo.service${ch}`], "the exact byte identity is retained, never trimmed");
+    const trimmedEvidence = { classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "synthetic service authority" } };
+    assert.notEqual(targetConfidence(trimmedEvidence), "verified", "evidence for the trimmed identity must not verify");
+    assert.equal(targetConfidence(trimmedEvidence), "candidate");
+    const exactEvidence = { classification: c, verifiedTarget: { target: `foo.service${ch}`, ruleId: "service-manager-lifecycle", operation: "restart", evidence: "exact byte identity" } };
+    assert.equal(targetConfidence(exactEvidence), "verified", "evidence bound to the exact bytes verifies");
+    const conf = targetConfidence(trimmedEvidence);
+    assert.equal(decide({ classification: c, confidence: conf, mode: "enforce", policy }).action, "ownership-hold");
+    assert.equal(decide({ classification: c, confidence: conf, mode: "shadow", policy }).action, "log-uncertainty");
+  }
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
