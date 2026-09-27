@@ -1,7 +1,7 @@
 {
   "schema": "workflow-pack/v1",
   "name": "managed-operations",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Repo-structure-independent discovery of managed operational commands for coding agents. One manifest, many runtimes: the seek-first line, the discovery skill, the fixtures, and the coverage lint are all compiled from or checked against this file.",
   "seek_first": "Before proposing or running commands to start, stop, restart, inspect, deploy, or restore a project service, server, or workbench, discover that project's managed CLI surface first (top-level --help, a machine-readable command manifest such as --command-manifest, repo AGENTS.md and docs index) and use its supported verbs with their required confirmation gates. Do not improvise kill, pkill, nohup, raw Docker, or ad-hoc lifecycle scripts when a managed command exists. Dev-checkout instructions and historical notes are evidence, not authority over a deployed service; unresolved ownership blocks mutation, not read-only diagnosis.",
   "skills": [
@@ -15,14 +15,17 @@
     {
       "name": "pi-workflow-pack",
       "path": "extensions/pi-workflow-pack",
-      "install": "~/.pi/agent/extensions/pi-workflow-pack"
+      "install": "~/.pi/agent/extensions/pi-workflow-pack",
+      "assets": ["lib"]
     }
   ],
   "verb_families": [
     {
       "name": "anvil-serving",
       "discovery": "anvil-serving --help",
+      "discovery_argv": ["anvil-serving", "--help"],
       "manifest": "anvil-serving --command-manifest",
+      "manifest_argv": ["anvil-serving", "--command-manifest"],
       "triggers": [
         "restart",
         "stop",
@@ -48,12 +51,56 @@
         "anvil-serving workbench pi-web-logs",
         "anvil-serving workbench pi-web-down --confirm",
         "anvil-serving workbench pi-web-up --confirm"
-      ]
+      ],
+      "registry_contract": {
+        "format": "json",
+        "expected_fields": ["commands"]
+      },
+      "ownership_contract": {
+        "targets": [
+          "pi-web service (systemd unit anvil-pi-web.service)"
+        ],
+        "resolution": "read-only: anvil-serving workbench pi-web-status; /proc/self/cgroup ancestry for co-residency",
+        "note": "A session supervising the service it runs inside must not perform its recovery (cgroup coupling)."
+      }
     }
   ],
   "policy": {
+    "contract_version": 1,
+    "default_mode": "shadow",
     "soft_deny": "Raw lifecycle commands (kill/pkill/nohup/systemctl restart) when a managed verb family covers the target; the deny reason must name the managed alternative and its confirmation gate.",
     "hard_deny": [],
-    "note": "Enforcement is out of scope for v0.1 (shadow mode first); see README roadmap."
+    "rules": [
+      {
+        "id": "raw-process-kill",
+        "failure_class": "raw-process-kill",
+        "severity": "reversible",
+        "match": {
+          "executables": ["kill", "pkill", "killall", "nohup"]
+        },
+        "eligibility": "verified target authority + sourced managed alternative; never a bare PID or broad pattern alone"
+      },
+      {
+        "id": "service-manager-lifecycle",
+        "failure_class": "dev-server-restart-drift",
+        "severity": "reversible",
+        "match": {
+          "executables": ["systemctl", "launchctl"],
+          "args": ["\\b(start|stop|restart|kill)\\b"]
+        },
+        "eligibility": "verified target authority + sourced managed alternative"
+      },
+      {
+        "id": "container-engine-lifecycle",
+        "failure_class": "raw-container-lifecycle",
+        "severity": "reversible",
+        "match": {
+          "executables": ["docker", "podman"],
+          "args": ["\\b(kill|restart|stop|rm)\\b"]
+        },
+        "eligibility": "verified target authority + sourced managed alternative"
+      }
+    ],
+    "note": "Enforcement-capable code ships with shadow defaults and zero broadly promoted targets (DESIGN-v0.3.md release policy); graduation requires the human gate per docs/DESIGN-v0.3.md §4."
   }
 }

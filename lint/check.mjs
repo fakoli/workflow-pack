@@ -218,6 +218,24 @@ if (checkInstalled) {
     } else {
       ok(`installed extension matches repo: ${installed}`);
     }
+    // shared runtime assets declared in the manifest (repo-root sources)
+    for (const asset of ext.assets || []) {
+      const repoAsset = join(root, asset);
+      if (!existsSync(repoAsset)) {
+        bad(`declared asset missing from repo: ${repoAsset}`);
+        continue;
+      }
+      for (const f of readdirSync(repoAsset)) {
+        const inst = join(installed, asset.replace(/^.*\//, ""), f);
+        if (!existsSync(inst)) {
+          bad(`installed lib asset missing: ${inst} — run: ./install.sh`);
+        } else if (readFileSync(inst, "utf8") !== readFileSync(join(repoAsset, f), "utf8")) {
+          bad(`installed lib asset drifts from repo: ${inst} — run: ./install.sh`);
+        } else {
+          ok(`installed lib asset matches repo: ${asset}/${f}`);
+        }
+      }
+    }
   }
   const agents = join(homedir(), ".pi/agent/AGENTS.md");
   if (!existsSync(agents)) {

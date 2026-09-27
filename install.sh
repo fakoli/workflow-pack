@@ -100,13 +100,16 @@ for (const s of (m.extensions || [])) {
   if (!s.name || !s.path || !s.install) {
     console.error('install: extension entry missing name/path/install'); process.exit(1);
   }
-  console.log(s.path + '|' + s.install);
+  const assets = (s.assets || []).join(',');
+  console.log(s.path + '|' + s.install + '|' + assets);
 }
 " "${MANIFEST}")"
 
 while IFS= read -r entry; do
   src="${entry%%|*}"
-  dst="${entry#*|}"
+  rest="${entry#*|}"
+  dst="${rest%%|*}"
+  assets="${rest#*|}"
   dst="${dst/#\~/${HOME}}"
   [[ -f "${ROOT}/${src}/index.ts" ]] || { echo "install: missing extension source ${src}/index.ts" >&2; exit 1; }
   refuse_symlink_ancestors "${dst}"
@@ -117,6 +120,27 @@ while IFS= read -r entry; do
   if [[ -e "${dst}/index.ts" ]]; then
     mkdir -p "${BACKUP_DIR}/extensions/$(basename "${dst}")"
     cp -a "${dst}/index.ts" "${BACKUP_DIR}/extensions/$(basename "${dst}")/index.ts"
+  fi
+  # preflight declared shared assets (repo-root sources), independent of index.ts
+  if [[ -n "${assets}" ]]; then
+    IFS=',' read -ra ASSET_LIST <<< "${assets}"
+    for asset in "${ASSET_LIST[@]}"; do
+      [[ -d "${ROOT}/${asset}" ]] || { echo "install: missing declared asset ${asset}" >&2; exit 1; }
+      adst="${dst}/$(basename "${asset}")"
+      refuse_symlink_ancestors "${adst}"
+      if [[ -L "${adst}" ]]; then
+        echo "install: refuse: ${adst} is a symlink" >&2
+        exit 1
+      fi
+      if [[ -e "${adst}" && ! -d "${adst}" ]]; then
+        echo "install: refuse: ${adst} exists and is not a directory" >&2
+        exit 1
+      fi
+      if [[ -d "${adst}" ]]; then
+        mkdir -p "${BACKUP_DIR}/extensions/$(basename "${dst}")"
+        cp -a "${adst}" "${BACKUP_DIR}/extensions/$(basename "${dst}")/$(basename "${asset}")"
+      fi
+    done
   fi
 done <<< "${ext_entries}"
 if [[ -e "${AGENTS_MD}" ]]; then
@@ -161,16 +185,49 @@ while IFS= read -r entry; do
   echo "install: skill ${name} -> ${dst}/SKILL.md"
 done <<< "${skill_entries}"
 
-# -- mutate: extensions (atomic same-directory replacement) --
+# -- mutate: extensions (atomic same-directory replacement for index.ts;
+# staged replacement for shared assets — the rm/mv window is documented and
+# the preflight backup enables restoration) --
 while IFS= read -r entry; do
   src="${entry%%|*}"
-  dst="${entry#*|}"
+  rest="${entry#*|}"
+  dst="${rest%%|*}"
+  assets="${rest#*|}"
   dst="${dst/#\~/${HOME}}"
   name="$(basename "${dst}")"
   mkdir -p "${dst}"
   tmp="${dst}/index.ts.tmp.$$"
   cp "${ROOT}/${src}/index.ts" "${tmp}"
   mv "${tmp}" "${dst}/index.ts"
+  if [[ -n "${assets}" ]]; then
+    IFS=',' read -ra ASSET_LIST <<< "${assets}"
+    for asset in "${ASSET_LIST[@]}"; do
+      adst="${dst}/$(basename "${asset}")"
+      stage="${adst}.tmp.$$"
+      old="${adst}.old.$$"
+      rm -rf "${stage}"
+      cp -a "${ROOT}/${asset}" "${stage}" || {
+        echo "install: asset staging failed for ${adst}; no writes replaced" >&2
+        exit 1
+      }
+      # rename the previous asset aside, swap, then discard: on swap failure
+      # the previous asset is restored (recovery over atomicity)
+      if [[ -d "${adst}" ]]; then
+        mv "${adst}" "${old}"
+      fi
+      if mv "${stage}" "${adst}"; then
+        rm -rf "${old}"
+      else
+        if [[ -d "${old}" ]]; then
+          mv "${old}" "${adst}"
+          echo "install: asset replacement failed for ${adst}; previous restored" >&2
+        else
+          echo "install: asset replacement failed for ${adst}; no previous asset to restore" >&2
+        fi
+        exit 1
+      fi
+    done
+  fi
   echo "install: extension ${name} -> ${dst}/index.ts"
 done <<< "${ext_entries}"
 

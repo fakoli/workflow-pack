@@ -13,6 +13,29 @@ design.
 
 ## Shipped
 
+### v0.3.0 — Milestone 1: shared contract (design sequencing step 2)
+
+- `lib/guardrail.mjs` — pure command classification (supported /
+  non-lifecycle / uncertain, read-executable and read-verb negatives,
+  indirection and expansion detection), target-confidence levels, and the
+  §3.3 decision matrix. No I/O; execution, audit, and human confirmation
+  are supplied by the adapter.
+- `lib/discovery.mjs` — bounded registry projection through an injected
+  execution interface; schema, status, and size validated before a response
+  may be used for a denial.
+- `lib/audit.mjs` — versioned audit schema (v1) with fingerprints over raw
+  text and injected append handling.
+- Manifest: `policy.contract_version`, `policy.default_mode: shadow`,
+  `policy.rules[]` (stable IDs, severity, eligibility), argv arrays,
+  `registry_contract`, `ownership_contract`.
+- Deterministic pure tests: `node fixtures/test-lib.mjs` (100 checks,
+  including the adversarial regression corpus from two Astra review
+  rounds: executing substitutions, compound hard-rule ordering,
+  operation-bound ownership evidence, integrity holds, object-shaped
+  registry validation).
+- Installer installs `lib/` alongside the extension; lint checks lib-asset
+  drift.
+
 ### v0.1.x
 
 - Seek-first heuristic compiled from the manifest into the global `AGENTS.md`.

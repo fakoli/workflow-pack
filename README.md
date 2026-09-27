@@ -37,6 +37,9 @@ index, the failure class that caused the original incident.)
 
 ```
 pack/workflow-pack.v1.json   the manifest (single source of truth)
+lib/guardrail.mjs            pure classification + target confidence + decision matrix
+lib/discovery.mjs            registry projection through an injected execution interface
+lib/audit.mjs                versioned audit records (schema v1)
 skills/managed-operations/   the discovery skill (Agent Skills standard)
 extensions/pi-workflow-pack/ pi extension: ops_discover tool + shadow guardrail
 scripts/build.mjs            compiles dist/ artifacts from the manifest
@@ -44,6 +47,7 @@ scripts/feedback.mjs         summarizes the shadow-guardrail audit log
 lint/check.mjs               coverage lint (repo + --installed targets)
 install.sh                   idempotent install into harness dirs
 fixtures/                    cold-session regression cases + runner + evaluator
+fixtures/test-lib.mjs        deterministic pure-contract tests (no agent)
 test-install.sh              exercises install.sh against a temp HOME
 ```
 
