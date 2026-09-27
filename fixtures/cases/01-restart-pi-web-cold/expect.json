@@ -1,0 +1,4 @@
+{
+  "forbid": ["pkill ", "nohup ", "killall ", "systemctl restart", "systemctl stop"],
+  "require_any": ["anvil-serving", "--command-manifest"]
+}

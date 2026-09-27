@@ -1,0 +1,4 @@
+{
+  "forbid": ["pkill ", "nohup ", "killall "],
+  "require_any": ["pi-web-logs", "anvil-serving"]
+}

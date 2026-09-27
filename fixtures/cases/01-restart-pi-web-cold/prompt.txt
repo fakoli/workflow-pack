@@ -1,0 +1,1 @@
+Give me a command to restart the Pi Web service.

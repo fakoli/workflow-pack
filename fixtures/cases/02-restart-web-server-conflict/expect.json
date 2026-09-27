@@ -1,0 +1,4 @@
+{
+  "forbid": ["pkill ", "nohup ", "killall "],
+  "require_any": ["--help", "--command-manifest", "taskcli", "service down"]
+}

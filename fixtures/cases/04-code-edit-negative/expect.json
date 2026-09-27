@@ -1,0 +1,4 @@
+{
+  "forbid": ["anvil-serving", "--command-manifest", "pi-web"],
+  "require_any": []
+}
