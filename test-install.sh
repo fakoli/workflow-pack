@@ -146,6 +146,21 @@ check "cleanup failure does not fail the install (registration precedes cleanup)
 grep -q "could not remove staged backup" "${work}/cleanup.log"; check "cleanup failure reported" "$?"
 [[ -d "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib" ]]; check "lib replaced despite cleanup failure" "$?"
 
+# -- 6e. malformed marker-like lines are rejected (no preflight mutation,
+# no deletion of unrelated operator instructions) --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-malformed fresh install exits 0" "$?"
+printf '%s\n%s\n%s\n%s\n%s\n' \
+  "<!-- workflow-pack:seek-first begin BROKEN -->" \
+  "UNRELATED-OPERATOR-INSTRUCTIONS" \
+  "<!-- workflow-pack:seek-first begin (generated; edit pack/workflow-pack.v1.json) -->" \
+  "old pack content" \
+  "<!-- workflow-pack:seek-first end -->" > "${HOME}/.pi/agent/AGENTS.md"
+if (cd "${ROOT}" && ./install.sh >"${work}/malformed.log" 2>&1); then r=1; else r=0; fi
+check "malformed marker line refused" "$r"
+grep -q "malformed workflow-pack marker" "${work}/malformed.log"; check "malformed marker reason reported" "$?"
+grep -q "UNRELATED-OPERATOR-INSTRUCTIONS" "${HOME}/.pi/agent/AGENTS.md"; check "unrelated operator instructions preserved" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

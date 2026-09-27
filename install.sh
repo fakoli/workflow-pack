@@ -209,11 +209,17 @@ fi
 block="$(cat "${ROOT}/dist/AGENTS-seek-first.md")"
 tmp_md="${AGENTS_MD}.tmp.$$"
 if grep -q "${BEGIN_LINE_PREFIX}" "${AGENTS_MD}"; then
-  python3 - "${AGENTS_MD}" "${tmp_md}" "${ROOT}/dist/AGENTS-seek-first.md" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" <<'PY'
+  python3 - "${AGENTS_MD}" "${tmp_md}" "${ROOT}/dist/AGENTS-seek-first.md" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" "${BEGIN_LINE_EXACT}" <<'PY'
 import re, sys
-path, tmp, block_path, bm, em = sys.argv[1:6]
+path, tmp, block_path, bm, em, exact = sys.argv[1:7]
 text = open(path).read()
 block = open(block_path).read().rstrip("\n")
+# malformed marker-like lines (a prefix match that is not the exact
+# generated opener) are rejected — replacement never starts at a malformed
+# opener and never deletes unrelated operator instructions
+for line in text.split("\n"):
+    if line.lstrip().startswith(bm) and line != exact:
+        sys.exit("install: malformed workflow-pack marker line; refusing to replace — fix or remove it manually")
 pattern = re.compile(rf"<!-- {re.escape(bm.removeprefix('<!-- '))}[^\n]*-->.*?{re.escape(em)}", re.S)
 new, n = pattern.subn(block, text, count=1)
 if n != 1:

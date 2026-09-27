@@ -407,6 +407,45 @@ check("option arities and required operands (no invented targets)", () => {
   assert.equal(classifyCommand("pkill -s 9 node", policy).kind, "lifecycle");
   assert.equal(classifyCommand("docker rm -f web", policy).kind, "lifecycle");
 });
+check("read-executable positive grammars: quoting/escaping/positional forms are uncertain", () => {
+  for (const cmd of ['date "-s" 2000-01-01', "date 092712002026", "man -P custom-hook ls", 'rg \\--pre custom-hook pattern file']) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: quoted/escaped/positional/option forms are unsupported read forms`);
+  }
+  // explicitly supported literal examples are preserved
+  assert.equal(classifyCommand('echo "kill 1"', policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand('echo \'kill 1\'', policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand('echo "a # b"', policy).kind, "non-lifecycle");
+});
+check("probe spelling and read-verb option applicability", () => {
+  for (const cmd of ['pkill -0 "--signal" 9 node', "kill -0 *.pid", "docker ps --time"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: quoted options, metacharacter operands, and verb-inapplicable options escape nothing`);
+  }
+  const compound = classifyCommand('kill 1; pkill -0 "--signal" 9 node', policy);
+  assert.equal(
+    targetConfidence({ classification: compound, verifiedTarget: { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true } }),
+    "candidate",
+    "a quoted-option tail cannot verify the compound"
+  );
+});
+check("verb-specific option semantics (no erased operands or invented targets)", () => {
+  const vt = { target: "TERM", ruleId: "container-engine-lifecycle", operation: "kill", evidence: "x", resolved: true };
+  for (const cmd of ["docker kill -s TERM", "kill -s 9", "kill -9 -9 123", "kill 123 -9", "pkill -n node extra", "docker rm -f -t 5 web"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: option arity/position/repetition rules reject the form`);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+  // supported verb-specific forms still classify
+  assert.equal(classifyCommand("docker kill -s TERM web", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("kill -l", policy).kind, "non-lifecycle", "kill -l is a read-only diagnosis flag");
+  assert.equal(classifyCommand("docker rm -f web", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("docker stop -t 5 web", policy).kind, "lifecycle");
+});
+check("read verbs may carry multiple operands (diagnosis subjects)", () => {
+  const c = classifyCommand("systemctl status foo bar", policy);
+  assert.equal(c.kind, "non-lifecycle", "read-only diagnosis operands are not mutation targets");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");

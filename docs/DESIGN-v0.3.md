@@ -110,6 +110,9 @@ deliberately small command recognizer:
   `grep`, or similar read operations are not lifecycle execution.
 - Shell indirection, dynamic expansions, aliases, wrapper scripts, and
   unsupported forms are marked uncertain.
+- The multiple-target exclusion applies to MUTATION operations: read-only
+  diagnosis verbs may carry multiple operands (`systemctl status a b`)
+  because operands are diagnosis subjects, not affected targets.
 
 Do not claim comprehensive shell coverage. Ambiguous cases must be visible
 in the audit rather than silently treated as confidently safe.
