@@ -627,6 +627,24 @@ check("short-option arities: missing values and absent options", () => {
   assert.equal(classifyCommand("pkill -w node", policy).kind, "uncertain");
   assert.equal(classifyCommand("killall -t node", policy).kind, "uncertain");
 });
+check("backslash-newline continuation is removed in read operands", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["rg -F foo \\\n--pre custom-hook pattern file", "man ls \\\n-P custom-hook"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: a line continuation does not hide command-bearing options`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+});
+check("killall undeclared shorts are uncertain", () => {
+  for (const cmd of ["killall -f node", "killall -x node", "killall -c node"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: not a declared killall option`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true } }), "verified");
+  }
+  assert.equal(classifyCommand("killall node", policy).kind, "lifecycle");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
