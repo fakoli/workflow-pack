@@ -177,6 +177,19 @@ check "indented-closer file installs at the exact closer" "$r"
 # either way the result must not contain duplicate closing markers
 [[ "$(grep -c 'workflow-pack:seek-first end' "${HOME}/.pi/agent/AGENTS.md")" == "1" ]]; check "no duplicate closing markers" "$?"
 
+# -- 6g. malformed orphan closers are refused on the append path (no
+# mutation; the append path is only for files with NO marker text) --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-orphan fresh install exits 0" "$?"
+printf '%s\n%s\n' "KEEP" "  <!-- workflow-pack:seek-first end BROKEN -->" > "${HOME}/.pi/agent/AGENTS.md"
+if (cd "${ROOT}" && ./install.sh >"${work}/orphan1.log" 2>&1); then r=0; else r=1; fi
+[[ "$r" == "1" ]]; check "malformed orphan closer refused" "$?"
+grep -q "KEEP" "${HOME}/.pi/agent/AGENTS.md" && ! grep -q "seek-first begin" "${HOME}/.pi/agent/AGENTS.md"; check "refused file unmutated" "$?"
+printf '%s\n%s\n' "KEEP2" "<!-- workflow-pack:seek-first end-->" > "${HOME}/.pi/agent/AGENTS.md"
+if (cd "${ROOT}" && ./install.sh >"${work}/orphan2.log" 2>&1); then r=0; else r=1; fi
+[[ "$r" == "1" ]]; check "no-space orphan closer refused" "$?"
+grep -q "KEEP2" "${HOME}/.pi/agent/AGENTS.md" && ! grep -q "seek-first begin" "${HOME}/.pi/agent/AGENTS.md"; check "refused file unmutated (2)" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

@@ -222,10 +222,11 @@ lines = text.split("\n")
 opener_idx = None
 end_idx = None
 for i, line in enumerate(lines):
-    if bm in line and line != exact:
+    # family-based detection: ANY workflow-pack marker mention that is not
+    # the exact opener or exact closer (inline mentions, malformed closer
+    # variants like 'end BROKEN' or 'end-->') is malformed
+    if "workflow-pack:seek-first" in line and line != exact and line.strip() != em:
         sys.exit("install: malformed workflow-pack marker text; refusing to replace — fix or remove it manually")
-    if em in line and line.strip() != em:
-        sys.exit("install: inline workflow-pack end-marker text; refusing to replace — fix or remove it manually")
     if line == exact and opener_idx is None:
         opener_idx = i
     if line == em and end_idx is None and opener_idx is not None:
@@ -240,13 +241,14 @@ else
   { cat "${AGENTS_MD}"; printf '\n%s\n' "${block}"; } > "${tmp_md}"
   compute_mode="append"
   # the append path validates marker text too: it is only for files with NO
-  # markers at all — any opener/closer mention (including an orphan or
-  # malformed closer) is malformed, never silently appended to
-  python3 - "${AGENTS_MD}" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" "${BEGIN_LINE_EXACT}" <<'PY'
+  # markers at all — ANY workflow-pack marker-family mention (exact, orphan,
+  # or malformed closer variants like 'end BROKEN' or 'end-->') is malformed,
+  # never silently appended to
+  python3 - "${AGENTS_MD}" <<'PY'
 import sys
-path, bm, em, exact = sys.argv[1:5]
+path = sys.argv[1]
 for line in open(path).read().split("\n"):
-    if bm in line or em in line:
+    if "workflow-pack:seek-first" in line:
         sys.exit("install: malformed workflow-pack marker text; refusing to append — fix or remove it manually")
 PY
 fi

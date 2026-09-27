@@ -541,9 +541,12 @@ check("launchctl kill target is the service, not the signal", () => {
   assert.equal(c.kind, "lifecycle");
   assert.equal(c.explicitTargets.length, 1);
   assert.equal(c.explicitTargets[0], "system/web");
-  // evidence bound to the signal does not verify
-  const signalEvidence = { classification: c, verifiedTarget: { target: "TERM", ruleId: "launchctl-kill", operation: "kill", evidence: "signal bound", resolved: true } };
+  // evidence bound to the signal does not verify; evidence bound to the
+  // service does (semantic assertions on both outcomes)
+  const signalEvidence = { classification: c, verifiedTarget: { target: "TERM", ruleId: "service-manager-lifecycle", operation: "kill", evidence: "signal bound", resolved: true } };
   assert.notEqual(targetConfidence(signalEvidence), "verified");
+  const serviceEvidence = { classification: c, verifiedTarget: { target: "system/web", ruleId: "service-manager-lifecycle", operation: "kill", evidence: "service bound", resolved: true } };
+  assert.equal(targetConfidence(serviceEvidence), "verified");
   // extra operands beyond the exact form are uncertain
   assert.equal(classifyCommand("launchctl kill TERM web extra", policy).kind, "uncertain");
   assert.equal(classifyCommand("launchctl start web extra", policy).kind, "uncertain");
@@ -571,6 +574,36 @@ check("malformed command lists are uncertain", () => {
     assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
   }
   assert.equal(classifyCommand("kill 1; echo hi", policy).kind, "lifecycle");
+});
+check("escaped quotes do not hide command-bearing read options", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ['rg foo\\" --pre custom-hook pattern file', 'man foo\\" -P custom-hook ls']) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: an escaped quote does not open a quote span`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+});
+check("unquoted parentheses in read operands are uncertain", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["rg (a) file", "rg (unclosed pattern file", "man (x) ls"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: unquoted parentheses are unsupported shell syntax`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+  // quoted parentheses are literal
+  assert.equal(classifyCommand('grep "(a)" file', policy).kind, "non-lifecycle");
+});
+check("pkill --nslist takes a value; killall option table is accurate", () => {
+  // --nslist takes a namespace list value (installed help)
+  assert.equal(classifyCommand("pkill --nslist node", policy).kind, "uncertain");
+  // killall declares no --parent/--newest/--nslist
+  for (const cmd of ["killall --parent 123 node", "killall --newest node", "killall --nslist x node"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: not a declared killall option`);
+  }
+  assert.equal(classifyCommand("killall node", policy).kind, "lifecycle");
 });
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
