@@ -61,6 +61,32 @@ if (cd "${ROOT}" && ./install.sh >/dev/null 2>&1); then r=1; else r=0; fi
 check "symlinked AGENTS.md refused" "$r"
 [[ "$(cat "${work}/real-agents.md")" == "real content" ]]; check "symlink target untouched" "$?"
 
+# -- 6. staging-failure injection: asset staging fails → rollback restores
+# completed writes, backups reported --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-injection fresh install exits 0" "$?"
+before_injection_skill="$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md")"
+before_injection_index="$(cat "${HOME}/.pi/agent/extensions/pi-workflow-pack/index.ts")"
+chmod 000 "${ROOT}/lib"
+if (cd "${ROOT}" && ./install.sh >"${work}/injection.log" 2>&1); then r=1; else r=0; fi
+chmod 755 "${ROOT}/lib"
+check "staging failure exits nonzero" "$r"
+grep -q "rolled back" "${work}/injection.log"; check "failure reports rollback" "$?"
+grep -q ".backups/" "${work}/injection.log"; check "failure reports backup location" "$?"
+[[ "$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md")" == "${before_injection_skill}" ]]; check "rollback restored skill content" "$?"
+[[ "$(cat "${HOME}/.pi/agent/extensions/pi-workflow-pack/index.ts")" == "${before_injection_index}" ]]; check "rollback restored index.ts" "$?"
+
+# -- 7. regular file at the lib destination is refused --
+rm -rf "${HOME}"; mkdir -p "${HOME}/.pi/agent/extensions/pi-workflow-pack"
+printf 'not a dir\n' > "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib"
+if (cd "${ROOT}" && HOME="${HOME}" ./install.sh >/dev/null 2>&1); then r=1; else r=0; fi
+check "regular file at lib destination refused" "$r"
+
+# -- 8. lib assets installed on fresh install --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "fresh install exits 0" "$?"
+[[ -f "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib/guardrail.mjs" ]]; check "lib asset installed" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

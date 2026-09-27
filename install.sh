@@ -172,6 +172,41 @@ else
   compute_mode="append"
 fi
 
+# -- mutate phase: track completed writes and roll back on failure. Every
+# replaced path that had a preflight backup is restored from it (recorded
+# as path|backup pairs); paths created fresh (no backup) are removed.
+# Surviving backups are always reported so manual recovery stays possible. --
+MUTATED=()   # path|backup pairs written during this run
+CREATED=()   # paths created fresh (no prior version to restore)
+
+rollback_mutations() {
+  local rc=$?
+  if [[ ${rc} -eq 0 ]]; then
+    trap - EXIT
+    return 0
+  fi
+  local restored=0 failed=0 pair path bak
+  for pair in "${MUTATED[@]}"; do
+    path="${pair%%|*}"
+    bak="${pair#*|}"
+    if [[ -e "${bak}" ]]; then
+      if mkdir -p "$(dirname "${path}")" && cp -a "${bak}" "${path}"; then
+        restored=$((restored + 1))
+      else
+        failed=$((failed + 1))
+        echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
+      fi
+    fi
+  done
+  for path in "${CREATED[@]}"; do
+    rm -rf "${path}"
+  done
+  echo "install: FAILED (exit ${rc}) after partial mutation; rolled back ${restored} replaced path(s), removed ${#CREATED[@]} created path(s)" >&2
+  echo "install: preflight backups retained at ${BACKUP_DIR} for manual recovery" >&2
+  exit "${rc}"
+}
+trap rollback_mutations EXIT
+
 # -- mutate: skills (atomic same-directory replacement) --
 while IFS= read -r entry; do
   src="${entry%%|*}"
@@ -182,6 +217,11 @@ while IFS= read -r entry; do
   tmp="${dst}/SKILL.md.tmp.$$"
   cp "${ROOT}/${src}" "${tmp}"
   mv "${tmp}" "${dst}/SKILL.md"
+  if [[ -e "${BACKUP_DIR}/skills/${name}/SKILL.md" ]]; then
+    MUTATED+=("${dst}/SKILL.md|${BACKUP_DIR}/skills/${name}/SKILL.md")
+  else
+    CREATED+=("${dst}/SKILL.md")
+  fi
   echo "install: skill ${name} -> ${dst}/SKILL.md"
 done <<< "${skill_entries}"
 
@@ -199,6 +239,11 @@ while IFS= read -r entry; do
   tmp="${dst}/index.ts.tmp.$$"
   cp "${ROOT}/${src}/index.ts" "${tmp}"
   mv "${tmp}" "${dst}/index.ts"
+  if [[ -e "${BACKUP_DIR}/extensions/${name}/index.ts" ]]; then
+    MUTATED+=("${dst}/index.ts|${BACKUP_DIR}/extensions/${name}/index.ts")
+  else
+    CREATED+=("${dst}/index.ts")
+  fi
   if [[ -n "${assets}" ]]; then
     IFS=',' read -ra ASSET_LIST <<< "${assets}"
     for asset in "${ASSET_LIST[@]}"; do
@@ -207,7 +252,7 @@ while IFS= read -r entry; do
       old="${adst}.old.$$"
       rm -rf "${stage}"
       cp -a "${ROOT}/${asset}" "${stage}" || {
-        echo "install: asset staging failed for ${adst}; no writes replaced" >&2
+        echo "install: asset staging failed for ${adst}; earlier writes in this run will be rolled back" >&2
         exit 1
       }
       # rename the previous asset aside, swap, then discard: on swap failure
@@ -217,10 +262,18 @@ while IFS= read -r entry; do
       fi
       if mv "${stage}" "${adst}"; then
         rm -rf "${old}"
+        if [[ -d "${BACKUP_DIR}/extensions/${name}/$(basename "${asset}")" ]]; then
+          MUTATED+=("${adst}|${BACKUP_DIR}/extensions/${name}/$(basename "${asset}")")
+        else
+          CREATED+=("${adst}")
+        fi
       else
         if [[ -d "${old}" ]]; then
-          mv "${old}" "${adst}"
-          echo "install: asset replacement failed for ${adst}; previous restored" >&2
+          if mv "${old}" "${adst}"; then
+            echo "install: asset replacement failed for ${adst}; previous restored" >&2
+          else
+            echo "install: asset replacement failed for ${adst}; restoration FAILED; previous asset at ${old}" >&2
+          fi
         else
           echo "install: asset replacement failed for ${adst}; no previous asset to restore" >&2
         fi
@@ -233,6 +286,11 @@ done <<< "${ext_entries}"
 
 # -- mutate: AGENTS.md (the replacement was already computed and validated) --
 mv "${tmp_md}" "${AGENTS_MD}"
+if [[ -e "${BACKUP_DIR}/AGENTS.md" ]]; then
+  MUTATED+=("${AGENTS_MD}|${BACKUP_DIR}/AGENTS.md")
+else
+  CREATED+=("${AGENTS_MD}")
+fi
 if [[ "${compute_mode}" == "replace" ]]; then
   echo "install: seek-first block replaced in ${AGENTS_MD}"
 else

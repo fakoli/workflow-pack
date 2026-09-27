@@ -147,10 +147,25 @@ check("echo ok # ; kill 1 → non-lifecycle (comment truncation)", () => {
 check('echo "a # b" → non-lifecycle (quoted # is literal)', () => {
   assert.equal(classifyCommand('echo "a # b"', policy).kind, "non-lifecycle");
 });
-check('echo "kill $(x)" → uncertain (double quotes do NOT suppress command substitution)', () => {
+check('echo "kill $(x)" → uncertain, lifecycleInside FALSE (substituted command is x, not kill)', () => {
   const c = classifyCommand('echo "kill $(x)"', policy);
   assert.equal(c.kind, "uncertain");
-  assert.equal(c.lifecycleInside, true, "the substitution executes kill inside double quotes");
+  assert.equal(c.lifecycleInside, false, "the substituted command is x, not kill — literal kill is outside the substitution");
+});
+check('echo "$(kill 1)" → uncertain, lifecycleInside TRUE (substitution contents execute kill)', () => {
+  const c = classifyCommand('echo "$(kill 1)"', policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, true);
+});
+check('echo \'kill 1\' "$(date)" → uncertain, lifecycleInside FALSE (only date executes)', () => {
+  const c = classifyCommand('echo \'kill 1\' "$(date)"', policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, false, "kill 1 is single-quoted literal text; only date executes");
+});
+check("echo $(date) → uncertain, no lifecycleInside (harmless substitution)", () => {
+  const c = classifyCommand("echo $(date)", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, false);
 });
 check("echo `kill 1` → uncertain (backticks execute inside double quotes too)", () => {
   const c = classifyCommand('echo "`kill 1`"', policy);
@@ -177,6 +192,47 @@ check("systemctl status $(kill 1) → uncertain (substitution executes in a read
 });
 check("echo ok > /tmp/x → uncertain (redirect writes)", () => {
   assert.equal(classifyCommand("echo ok > /tmp/x", policy).kind, "uncertain");
+});
+check("redirects without whitespace are still redirects (integrity hold applies)", () => {
+  for (const cmd of ["echo x>installed-policy.json", "echo 'x'>installed-policy.json", "echo x 1>installed-policy.json", "cat /dev/null>installed-policy.json"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.notEqual(c.kind, "lifecycle", cmd);
+    const enforce = decide({ classification: c, confidence: "unknown", mode: "enforce", policy, integrity: true });
+    assert.equal(enforce.action, "integrity-hold", `${cmd} must integrity-hold under detected tampering`);
+  }
+});
+check("single-quoted backslash is literal: echo '\\'; kill 1 → lifecycle", () => {
+  const c = classifyCommand("echo '\\'; kill 1", policy);
+  assert.equal(c.kind, "lifecycle", "the single-quoted backslash closes the quote; kill 1 is a separate command");
+});
+check("echo '\\' \"$(kill 1)\" → uncertain with lifecycleInside (substitution executes)", () => {
+  const c = classifyCommand("echo '\\' \"$(kill 1)\"", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, true);
+});
+check("systemctl restart foo.service bar → uncertain (unrecognized operand never dropped)", () => {
+  const c = classifyCommand("systemctl restart foo.service bar", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.multiTarget, true);
+});
+check("compound with multiple matched rules: single-operation evidence is never verified", () => {
+  const c = classifyCommand("systemctl restart foo.service; kill 123", policy);
+  assert.equal(c.ruleIds.length, 2);
+  assert.equal(
+    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "x" } }),
+    "candidate",
+    "evidence binds one operation; the kill's unresolved PID is not covered"
+  );
+});
+check("systemctl restart foo.service; systemctl stop bar: two targets, one binding → candidate, never verified", () => {
+  const c = classifyCommand("systemctl restart foo.service; systemctl stop bar", policy);
+  assert.equal(c.kind, "lifecycle");
+  assert.equal(c.explicitTargets.length, 2);
+  assert.equal(
+    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "x" } }),
+    "candidate",
+    "one binding cannot cover two affected targets"
+  );
 });
 check('echo \\" # comment then kill → lifecycle (escaped quote is literal, comment ends, kill executes)', () => {
   const c = classifyCommand('echo \\" # comment\nkill 1', policy);

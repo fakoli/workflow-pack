@@ -28,8 +28,8 @@ design.
 - Manifest: `policy.contract_version`, `policy.default_mode: shadow`,
   `policy.rules[]` (stable IDs, severity, eligibility), argv arrays,
   `registry_contract`, `ownership_contract`.
-- Deterministic pure tests: `node fixtures/test-lib.mjs` (100 checks,
-  including the adversarial regression corpus from two Astra review
+- Deterministic pure tests: `node fixtures/test-lib.mjs` (109 checks,
+  including the adversarial regression corpus from three Astra review
   rounds: executing substitutions, compound hard-rule ordering,
   operation-bound ownership evidence, integrity holds, object-shaped
   registry validation).
