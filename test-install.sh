@@ -61,6 +61,15 @@ if (cd "${ROOT}" && ./install.sh >/dev/null 2>&1); then r=1; else r=0; fi
 check "symlinked AGENTS.md refused" "$r"
 [[ "$(cat "${work}/real-agents.md")" == "real content" ]]; check "symlink target untouched" "$?"
 
+# -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
+h2="${work}/home2"
+mkdir -p "${h2}/.pi/agent-real"
+ln -s "${h2}/.pi/agent-real" "${h2}/.pi/agent"
+if (cd "${ROOT}" && HOME="${h2}" ./install.sh >/dev/null 2>&1); then r=1; else r=0; fi
+check "symlinked ancestor refused" "$r"
+[[ -z "$(ls -A "${h2}/.pi/agent-real" 2>/dev/null)" ]]; check "ancestor refusal wrote nothing into the real dir" "$?"
+[[ ! -e "${h2}/.agents" ]]; check "ancestor refusal happens before skill install" "$?"
+
 echo ""
 echo "installer tests: pass ${pass} / fail ${fail}"
 [[ ${fail} -eq 0 ]]

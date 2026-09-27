@@ -18,7 +18,22 @@ AGENTS_MD="${HOME}/.pi/agent/AGENTS.md"
 STAMP="$(date +%Y-%m-%dT%H%M%S)-$$"
 BACKUP_DIR="${ROOT}/.backups/${STAMP}"
 BEGIN_LINE_PREFIX="<!-- workflow-pack:seek-first begin"
+BEGIN_LINE_EXACT="<!-- workflow-pack:seek-first begin (generated; edit pack/workflow-pack.v1.json) -->"
 END_MARKER_EXACT="<!-- workflow-pack:seek-first end -->"
+
+# Refuse when any ancestor directory of <path> is a symlink: a symlinked
+# ancestor is an escape hatch that redirects writes outside the declared
+# install target.
+refuse_symlink_ancestors() {
+  local p="${1%/}"
+  while [[ "${p}" != "/" && "${p}" != "." && -n "${p}" ]]; do
+    if [[ -L "${p}" ]]; then
+      echo "install: refuse: ${p} is a symlink" >&2
+      exit 1
+    fi
+    p="$(dirname "${p}")"
+  done
+}
 
 node "${ROOT}/scripts/build.mjs"
 
@@ -29,16 +44,20 @@ if [[ -L "${AGENTS_MD}" ]]; then
   echo "install: refuse: ${AGENTS_MD} is a symlink" >&2
   exit 1
 fi
+refuse_symlink_ancestors "${AGENTS_MD}"
 if [[ -e "${AGENTS_MD}" ]]; then
-  python3 - "${AGENTS_MD}" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" <<'PY'
+  python3 - "${AGENTS_MD}" "${BEGIN_LINE_EXACT}" "${END_MARKER_EXACT}" <<'PY'
 import sys
 path, bm, em = sys.argv[1:4]
 text = open(path).read()
-begins = text.count(bm)
-ends = text.count(em)
+lines = text.splitlines()
+# exact full-line grammar: count lines that equal the markers exactly, not
+# prefix matches — a hand-edited or suffixed variant is malformed
+begins = sum(1 for l in lines if l == bm)
+ends = sum(1 for l in lines if l == em)
 if begins != ends or begins > 1:
-    sys.exit(f"install: malformed marker structure in {path} (begin={begins}, end={ends}); fix manually — refusing to mutate")
-if begins == 1 and text.index(em) < text.index(bm):
+    sys.exit(f"install: malformed marker structure in {path} (exact begin lines={begins}, exact end lines={ends}); expected exactly one '{bm}' and one '{em}'; fix manually — refusing to mutate")
+if begins == 1 and lines.index(em) < lines.index(bm):
     sys.exit(f"install: end marker precedes begin marker in {path}; refusing to mutate")
 PY
 fi
@@ -64,6 +83,7 @@ while IFS= read -r entry; do
   dst="${entry#*|}"
   dst="${dst/#\~/${HOME}}"
   [[ -f "${ROOT}/${src}" ]] || { echo "install: missing skill source ${src}" >&2; exit 1; }
+  refuse_symlink_ancestors "${dst}"
   if [[ -L "${dst}" || -L "${dst}/SKILL.md" ]]; then
     echo "install: refuse: ${dst} is a symlink" >&2
     exit 1
@@ -89,6 +109,7 @@ while IFS= read -r entry; do
   dst="${entry#*|}"
   dst="${dst/#\~/${HOME}}"
   [[ -f "${ROOT}/${src}/index.ts" ]] || { echo "install: missing extension source ${src}/index.ts" >&2; exit 1; }
+  refuse_symlink_ancestors "${dst}"
   if [[ -L "${dst}" || -L "${dst}/index.ts" ]]; then
     echo "install: refuse: ${dst} is a symlink" >&2
     exit 1

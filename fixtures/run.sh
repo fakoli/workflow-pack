@@ -105,8 +105,12 @@ for d in "${CASES_DIR}"/*/; do
   fi
 
   # real-host gating: cases that touch the host's real CLIs/services are
-  # skipped unless explicitly allowed
-  real_host="$(python3 -c "import json,sys; print(1 if json.load(open(sys.argv[1])).get('real_host') else 0)" "${d}expect.json" 2>/dev/null || echo 0)"
+  # skipped unless explicitly allowed. Metadata must parse — a malformed
+  # expect.json fails the run instead of silently counting as host-safe.
+  real_host="$(python3 -c "import json,sys; print(1 if json.load(open(sys.argv[1])).get('real_host') else 0)" "${d}expect.json")" || {
+    echo "   ERROR: cannot read real_host from ${d}expect.json — fix the case metadata" >&2
+    exit 1
+  }
   if [[ "${real_host}" == "1" && ${allow_real_host} -eq 0 ]]; then
     echo "== ${name}"
     echo "   SKIP (real_host case — pass --allow-real-host to run against the real host)"

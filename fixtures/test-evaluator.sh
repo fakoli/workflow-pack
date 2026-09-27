@@ -33,6 +33,19 @@ EOF
 v="$(python3 "${EVAL}" "${work}/t1-expect.json" "${work}/t1.jsonl" t1 "${work}/v.jsonl" 2>/dev/null)" || true
 check "user-only transcript fails (role-awareness + completion)" "FAIL" "${v%%:*}"
 
+# -- 1b. Astra v0.3-review finding: a user-only transcript WITH agent_end
+# passes a forbid-only contract unless the evaluator requires substantive
+# assistant/tool activity. The user text must not count as evidence.
+cat > "${work}/t1b.jsonl" <<'EOF'
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"restart the pi web service with anvil-serving workbench pi-web-down --confirm"}]}}
+{"type":"agent_end"}
+EOF
+cat > "${work}/t1b-expect.json" <<'EOF'
+{"forbid_tools": ["pkill"], "forbid_text": ["nohup"]}
+EOF
+v="$(python3 "${EVAL}" "${work}/t1b-expect.json" "${work}/t1b.jsonl" t1b "${work}/v.jsonl" 2>/dev/null)" || true
+check "user-only with agent_end fails (no assistant/tool activity)" "FAIL" "${v%%:*}"
+
 # -- 2. Astra negative regression: rejecting the managed command and
 # recommending the raw decoy must FAIL case-02's contract.
 cat > "${work}/t2.jsonl" <<'EOF'

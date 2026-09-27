@@ -4,6 +4,13 @@ Ordered by dependency, not priority. Every item stays repo-structure-
 independent and preserves existing preview, confirmation, and human gates.
 Enforcement work never introduces a model-writable bypass.
 
+The v0.3 design for the remaining items — evidence-gated operational
+ guardrails, constructed with adversarial review — lives in
+[docs/DESIGN-v0.3.md](DESIGN-v0.3.md). Its sequencing step 1 (evidence
+foundation: evaluator activity requirement, runner fail-closed metadata,
+installer exact marker grammar + ancestor-symlink refusal) shipped with the
+design.
+
 ## Shipped
 
 ### v0.1.x

@@ -102,6 +102,8 @@ def main():
             problems.append("transcript incomplete: no agent_end event")
         if not saw_user:
             problems.append("transcript incomplete: no user message")
+        if not tool_inputs and not texts:
+            problems.append("transcript has no assistant or tool activity")
         if malformed:
             problems.append(f"{malformed} malformed event(s) skipped")
         for pat in expect.get("forbid_tools", []):
