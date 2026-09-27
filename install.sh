@@ -228,7 +228,7 @@ for i, line in enumerate(lines):
         sys.exit("install: inline workflow-pack end-marker text; refusing to replace — fix or remove it manually")
     if line == exact and opener_idx is None:
         opener_idx = i
-    if line.strip() == em and end_idx is None and opener_idx is not None:
+    if line == em and end_idx is None and opener_idx is not None:
         end_idx = i
 if opener_idx is None or end_idx is None or end_idx < opener_idx:
     sys.exit("install: exact marker span not found; refusing to write")
@@ -239,6 +239,15 @@ PY
 else
   { cat "${AGENTS_MD}"; printf '\n%s\n' "${block}"; } > "${tmp_md}"
   compute_mode="append"
+  # the append path validates marker text too: an inline opener/closer
+  # mention with no exact opener is malformed — never silently appended to
+  python3 - "${AGENTS_MD}" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" "${BEGIN_LINE_EXACT}" <<'PY'
+import sys
+path, bm, em, exact = sys.argv[1:5]
+for line in open(path).read().split("\n"):
+    if (bm in line and line != exact) or (em in line and line.strip() != em):
+        sys.exit("install: malformed workflow-pack marker text; refusing to append — fix or remove it manually")
+PY
 fi
 
 # -- mutate phase: track completed writes and roll back on failure --

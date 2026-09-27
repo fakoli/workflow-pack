@@ -161,6 +161,22 @@ check "malformed marker line refused" "$r"
 grep -q "malformed workflow-pack marker" "${work}/malformed.log"; check "malformed marker reason reported" "$?"
 grep -q "UNRELATED-OPERATOR-INSTRUCTIONS" "${HOME}/.pi/agent/AGENTS.md"; check "unrelated operator instructions preserved" "$?"
 
+# -- 6f. exact-closer boundary: an indented closer must not terminate
+# replacement (replacement uses exact complete lines for both boundaries) --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-closer fresh install exits 0" "$?"
+printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+  "<!-- workflow-pack:seek-first begin (generated; edit pack/workflow-pack.v1.json) -->" \
+  "OLD" \
+  "  <!-- workflow-pack:seek-first end -->" \
+  "OLD-PACK-TAIL" \
+  "<!-- workflow-pack:seek-first end -->" \
+  "AFTER" > "${HOME}/.pi/agent/AGENTS.md"
+if (cd "${ROOT}" && ./install.sh >"${work}/closer.log" 2>&1); then r=0; else r=1; fi
+check "indented-closer file handled (refused or replaced at the exact closer)" "$r"
+# either way the result must not contain duplicate closing markers
+[[ "$(grep -c 'workflow-pack:seek-first end' "${HOME}/.pi/agent/AGENTS.md")" == "1" ]]; check "no duplicate closing markers" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

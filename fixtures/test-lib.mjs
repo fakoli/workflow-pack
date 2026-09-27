@@ -492,6 +492,41 @@ check("read verbs are per executable", () => {
   assert.equal(classifyCommand("docker ps", policy).kind, "non-lifecycle");
   assert.equal(classifyCommand("systemctl status foo", policy).kind, "non-lifecycle");
 });
+check("repeated/conflicting signal selectors are not clean probes", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["kill -s 0 -s 9 123", "kill -n 0 -n 9 123"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: conflicting signal selectors are not a signal-zero probe`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: compound, verifiedTarget: vt }), "verified");
+  }
+  assert.equal(classifyCommand("kill -s 0 123", policy).kind, "non-lifecycle");
+});
+check("read operands that expand into options are uncertain", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["rg {--pre,custom-hook} pattern file", "man {-P,custom-hook} ls", "rg * pattern file"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: brace/glob expansion in a read operand is unsupported`);
+    const compound = classifyCommand(`kill 1; ${cmd}`, policy);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+  // unbalanced quoting is unsupported shell syntax
+  const c2 = classifyCommand('echo "unterminated', policy);
+  assert.equal(c2.kind, "uncertain");
+  assert.equal(classifyCommand('echo "balanced"', policy).kind, "non-lifecycle");
+});
+check("executable-specific diagnosis options and positional arities", () => {
+  for (const cmd of ["systemctl inspect web", "pkill -l foo", "killall -L foo"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: the option/verb is not supported for that executable`);
+  }
+  // launchctl kill takes a signal AND a service target
+  const c = classifyCommand("launchctl kill TERM", policy);
+  assert.equal(c.kind, "uncertain", "launchctl kill requires a signal and a service target");
+  assert.equal(c.explicitTargets.length, 0);
+  assert.equal(classifyCommand("launchctl kill TERM web", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("kill -l 123", policy).kind, "non-lifecycle");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
