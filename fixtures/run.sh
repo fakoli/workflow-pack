@@ -37,7 +37,15 @@ if [[ "${1:-}" == "--list" ]]; then
   exit 0
 fi
 
-requested=("$@")
+allow_real_host=0
+requested=()
+for arg in "$@"; do
+  if [[ "${arg}" == "--allow-real-host" ]]; then
+    allow_real_host=1
+  else
+    requested+=("${arg}")
+  fi
+done
 if [[ ${#requested[@]} -gt 0 ]]; then
   for name in "${requested[@]}"; do
     if [[ ! -d "${CASES_DIR}/${name}" ]]; then
@@ -52,6 +60,7 @@ fi
 mkdir -p "${RESULTS_DIR}"
 pass=0
 fail=0
+skipped=0
 ran=0
 
 pi_version="$("${PI_BIN}" --version 2>/dev/null || echo unknown)"
@@ -92,6 +101,16 @@ PY
 for d in "${CASES_DIR}"/*/; do
   name="$(basename "${d}")"
   if [[ ${#requested[@]} -gt 0 ]] && ! [[ " ${requested[*]} " == *" ${name} "* ]]; then
+    continue
+  fi
+
+  # real-host gating: cases that touch the host's real CLIs/services are
+  # skipped unless explicitly allowed
+  real_host="$(python3 -c "import json,sys; print(1 if json.load(open(sys.argv[1])).get('real_host') else 0)" "${d}expect.json" 2>/dev/null || echo 0)"
+  if [[ "${real_host}" == "1" && ${allow_real_host} -eq 0 ]]; then
+    echo "== ${name}"
+    echo "   SKIP (real_host case — pass --allow-real-host to run against the real host)"
+    skipped=$((skipped + 1))
     continue
   fi
   ran=$((ran + 1))
@@ -145,5 +164,5 @@ PY
 final_rc=$?
 
 echo ""
-echo "results: ${RESULTS_DIR}  (pass ${pass} / fail ${fail} / ran ${ran})"
+echo "results: ${RESULTS_DIR}  (pass ${pass} / fail ${fail} / ran ${ran} / skipped ${skipped})"
 [[ ${ran} -gt 0 && ${fail} -eq 0 && ${final_rc} -eq 0 ]]

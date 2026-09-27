@@ -173,6 +173,16 @@ if (!existsSync(casesDir)) {
         0;
       if (hasTeeth) ok(`fixture ${c}: well-formed`);
       else bad(`fixture ${c}: expect.json has no forbid/require patterns`);
+      // fixture-to-family relationship: a declared family must exist in the
+      // manifest's verb_families
+      if (expect.family !== undefined) {
+        const fams = (manifest.verb_families || []).map((f) => f.name);
+        if (!fams.includes(expect.family)) {
+          bad(`fixture ${c}: family "${expect.family}" not declared in manifest verb_families`);
+        } else {
+          ok(`fixture ${c}: family "${expect.family}" declared in manifest`);
+        }
+      }
     } catch (e) {
       bad(`fixture ${c}: expect.json does not parse (${e.message})`);
     }
@@ -193,6 +203,20 @@ if (checkInstalled) {
       bad(`installed skill drifts from repo: ${installed} — run: ./install.sh`);
     } else {
       ok(`installed skill matches repo: ${installed}`);
+    }
+  }
+  for (const ext of manifest.extensions || []) {
+    const installed = ext.install?.replace("~", homedir());
+    if (!installed) continue;
+    if (!existsSync(join(installed, "index.ts"))) {
+      bad(`installed extension missing: ${installed} — run: ./install.sh`);
+    } else if (
+      readFileSync(join(installed, "index.ts"), "utf8") !==
+      readFileSync(join(root, ext.path, "index.ts"), "utf8")
+    ) {
+      bad(`installed extension drifts from repo: ${installed} — run: ./install.sh`);
+    } else {
+      ok(`installed extension matches repo: ${installed}`);
     }
   }
   const agents = join(homedir(), ".pi/agent/AGENTS.md");

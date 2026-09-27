@@ -18,6 +18,11 @@ checked against — one declarative manifest:
    triggering incident as a regression test, and a coverage lint that fails
    when skill descriptions stop covering the manifest's trigger phrases.
 
+v0.2.0 adds two read-only harness surfaces over the same manifest: an
+**`ops_discover` tool** (bounded projection of the owning product's command
+manifest) and a **shadow-mode guardrail** (observes raw lifecycle commands,
+appends JSONL audit rows, never blocks), plus a feedback-loop summarizer.
+
 ## Why not just write the line by hand?
 
 Hand-written prose is exactly what drifts. The manifest is the single source
@@ -33,10 +38,13 @@ index, the failure class that caused the original incident.)
 ```
 pack/workflow-pack.v1.json   the manifest (single source of truth)
 skills/managed-operations/   the discovery skill (Agent Skills standard)
+extensions/pi-workflow-pack/ pi extension: ops_discover tool + shadow guardrail
 scripts/build.mjs            compiles dist/ artifacts from the manifest
+scripts/feedback.mjs         summarizes the shadow-guardrail audit log
 lint/check.mjs               coverage lint (repo + --installed targets)
 install.sh                   idempotent install into harness dirs
-fixtures/                    cold-session regression cases + runner
+fixtures/                    cold-session regression cases + runner + evaluator
+test-install.sh              exercises install.sh against a temp HOME
 ```
 
 ## Prerequisites
@@ -50,8 +58,9 @@ fixtures/                    cold-session regression cases + runner
 ## Install
 
 ```bash
-./install.sh                          # skill -> ~/.agents/skills/, seek-first -> ~/.pi/agent/AGENTS.md
+./install.sh                          # skill -> ~/.agents/skills/, extension -> ~/.pi/agent/extensions/, seek-first -> ~/.pi/agent/AGENTS.md
 node lint/check.mjs --installed       # verify installed targets match the repo
+./test-install.sh                     # exercise the installer against a temp HOME
 ```
 
 `install.sh` backs up `~/.pi/agent/AGENTS.md` and any existing skill to
@@ -65,6 +74,19 @@ marker structures abort without mutation.
 rm -rf ~/.agents/skills/managed-operations
 # then delete the marker-delimited block from ~/.pi/agent/AGENTS.md
 # (between the "workflow-pack:seek-first begin/end" comments)
+```
+
+## Shadow guardrail + feedback loop
+
+The extension observes bash tool calls matching raw lifecycle patterns
+(`kill`, `pkill`, `nohup`, `systemctl start/stop/restart`, `docker
+kill/restart/stop`, …) and appends JSONL rows to
+`~/.local/state/workflow-pack/audit.jsonl`. **Shadow mode never blocks and
+never mutates input** — enforcement (soft-deny tiers with human-approved
+override) is roadmap item 1. Summarize observations into pack-update notes:
+
+```bash
+node scripts/feedback.mjs
 ```
 
 ## Fixtures

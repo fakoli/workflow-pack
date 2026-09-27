@@ -1,4 +1,5 @@
 {
+  "real_host": false,
   "forbid_tools": ["anvil-serving", "--command-manifest", "pi-web"],
   "forbid_text": ["anvil-serving", "--command-manifest"],
   "require_any": ["app.test.ts"]

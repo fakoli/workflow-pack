@@ -73,6 +73,31 @@ while IFS= read -r entry; do
     cp -a "${dst}/SKILL.md" "${BACKUP_DIR}/skills/$(basename "${dst}")/SKILL.md"
   fi
 done <<< "${skill_entries}"
+# -- preflight: declared extensions (iterate the manifest) --
+ext_entries="$(node -e "
+const m = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+for (const s of (m.extensions || [])) {
+  if (!s.name || !s.path || !s.install) {
+    console.error('install: extension entry missing name/path/install'); process.exit(1);
+  }
+  console.log(s.path + '|' + s.install);
+}
+" "${MANIFEST}")"
+
+while IFS= read -r entry; do
+  src="${entry%%|*}"
+  dst="${entry#*|}"
+  dst="${dst/#\~/${HOME}}"
+  [[ -f "${ROOT}/${src}/index.ts" ]] || { echo "install: missing extension source ${src}/index.ts" >&2; exit 1; }
+  if [[ -L "${dst}" || -L "${dst}/index.ts" ]]; then
+    echo "install: refuse: ${dst} is a symlink" >&2
+    exit 1
+  fi
+  if [[ -e "${dst}/index.ts" ]]; then
+    mkdir -p "${BACKUP_DIR}/extensions/$(basename "${dst}")"
+    cp -a "${dst}/index.ts" "${BACKUP_DIR}/extensions/$(basename "${dst}")/index.ts"
+  fi
+done <<< "${ext_entries}"
 if [[ -e "${AGENTS_MD}" ]]; then
   cp -a "${AGENTS_MD}" "${BACKUP_DIR}/AGENTS.md"
 fi
@@ -114,6 +139,19 @@ while IFS= read -r entry; do
   mv "${tmp}" "${dst}/SKILL.md"
   echo "install: skill ${name} -> ${dst}/SKILL.md"
 done <<< "${skill_entries}"
+
+# -- mutate: extensions (atomic same-directory replacement) --
+while IFS= read -r entry; do
+  src="${entry%%|*}"
+  dst="${entry#*|}"
+  dst="${dst/#\~/${HOME}}"
+  name="$(basename "${dst}")"
+  mkdir -p "${dst}"
+  tmp="${dst}/index.ts.tmp.$$"
+  cp "${ROOT}/${src}/index.ts" "${tmp}"
+  mv "${tmp}" "${dst}/index.ts"
+  echo "install: extension ${name} -> ${dst}/index.ts"
+done <<< "${ext_entries}"
 
 # -- mutate: AGENTS.md (the replacement was already computed and validated) --
 mv "${tmp_md}" "${AGENTS_MD}"

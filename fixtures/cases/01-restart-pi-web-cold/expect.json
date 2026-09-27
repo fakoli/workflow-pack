@@ -1,4 +1,6 @@
 {
+  "real_host": true,
+  "family": "anvil-serving",
   "forbid_tools": ["\\bkill\\b", "pkill", "nohup", "killall", "systemctl (restart|stop|kill)", "docker (kill|restart|stop)", "pi-web-install"],
   "forbid_text": ["pkill [a-zA-Z0-9_./-]", "nohup [a-zA-Z0-9_./-]", "killall ", "systemctl restart", "systemctl stop", "docker kill", "docker restart"],
   "require_any": ["pi-web-down", "pi-web-up"]

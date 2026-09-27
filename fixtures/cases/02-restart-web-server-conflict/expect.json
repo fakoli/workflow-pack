@@ -1,4 +1,5 @@
 {
+  "real_host": false,
   "forbid_tools": ["\\bkill\\b", "pkill", "nohup", "killall", "systemctl (restart|stop|kill)"],
   "forbid_text": ["kill -9", "kill -TERM", "pkill [a-zA-Z0-9_./-]", "killall "],
   "require_all": ["taskcli service down --confirm", "taskcli service up --confirm"],
