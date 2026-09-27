@@ -1,6 +1,10 @@
 # Design v0.3 — evidence-gated operational guardrails
 
-**Status:** proposed, not implemented
+**Status:** partially implemented. Sequencing steps 1–2 have implementation
+and deterministic regression evidence; steps 3–7 remain unimplemented.
+The shared contract remains shadow-only; see the
+[closeout and retrospective](RETROSPECTIVE-shared-contract.md) for evidence
+and acceptance limits.
 **Constructed:** 2026-09-26, adversarially reviewed (Astra, fresh context,
 read-only) against the v0.2.0 tree; its concrete findings on the shipped
 evaluator, installer grammar, and runner metadata are fixed in the same

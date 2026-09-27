@@ -87,7 +87,7 @@ The extension observes bash tool calls matching raw lifecycle patterns
 kill/restart/stop`, …) and appends JSONL rows to
 `~/.local/state/workflow-pack/audit.jsonl`. **Shadow mode never blocks and
 never mutates input** — enforcement (soft-deny tiers with human-approved
-override) is roadmap item 1. Summarize observations into pack-update notes:
+override) follows fixture isolation and the behavioral baseline. Summarize observations into pack-update notes:
 
 ```bash
 node scripts/feedback.mjs
@@ -107,6 +107,19 @@ transcript (`--mode json`) and evaluates executed tool calls separately from
 assistant text, so a PASS attests what the agent did, not just what it said.
 Fixtures run with the host's real tools (no sandbox) — see the isolation
 warning in `fixtures/run.sh`.
+
+## Deterministic shared-contract verification
+
+```bash
+./fixtures/check-contract.sh
+```
+
+Runs library, inert Bash argv-oracle, installer, evaluator, syntax, and
+installed-drift checks. Installation is into a temporary HOME, never the
+live harness home. The Bash oracle requires `/bin/bash` and interprets only
+its fixed corpus with lifecycle names replaced by inert printing functions.
+This is not live enforcement or sandbox qualification. See the
+[implementation closeout and retrospective](docs/RETROSPECTIVE-shared-contract.md).
 
 ## Lint
 
