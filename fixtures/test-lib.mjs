@@ -446,6 +446,52 @@ check("read verbs may carry multiple operands (diagnosis subjects)", () => {
   const c = classifyCommand("systemctl status foo bar", policy);
   assert.equal(c.kind, "non-lifecycle", "read-only diagnosis operands are not mutation targets");
 });
+check("positive read enumeration: unsupported spellings and command-bearing options", () => {
+  for (const cmd of ['rg -\\-pre custom-hook pattern file', 'man -Hcustom-hook ls', 'man -P custom-hook ls']) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: unsupported option spelling is uncertain`);
+  }
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ['kill 1; rg -\\-pre custom-hook pattern file', 'kill 1; man -Hcustom-hook ls']) {
+    const c = classifyCommand(cmd, policy);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified", `${cmd}: a misclassified read form cannot verify the compound`);
+  }
+  assert.equal(classifyCommand("ls -la", policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand("grep -n foo", policy).kind, "non-lifecycle");
+});
+check("docker verb-specific options and value types", () => {
+  const vt = { target: "web", ruleId: "container-engine-lifecycle", operation: "kill", evidence: "x", resolved: true };
+  for (const cmd of ["docker kill -t web", "docker stop -l web", "docker stop -t invalid web"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: unsupported flags and invalid value types are unsupported`);
+    assert.equal(c.explicitTargets.length, 0, `${cmd}: no invented target`);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+  assert.equal(classifyCommand("docker kill -s TERM web", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("docker stop -t 5 web", policy).kind, "lifecycle");
+});
+check("diagnosis operands and incomplete invocations", () => {
+  // kill -l/-L operands are diagnosis subjects (signal conversion)
+  for (const cmd of ["kill -l 123", "kill -l TERM", "kill -l", "kill -L"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "non-lifecycle", `${cmd} is a signal-list/conversion operation`);
+  }
+  // incomplete invocations are uncertain, never confident non-lifecycle
+  for (const cmd of ["kill", "kill --", "kill -0", "kill -s 0"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd} lacks a complete supported invocation`);
+  }
+  assert.equal(classifyCommand("kill -0 1", policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand("kill -s 0 123", policy).kind, "non-lifecycle");
+});
+check("read verbs are per executable", () => {
+  for (const cmd of ["docker is-active web", "systemctl ps", "launchctl inspect web"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: the verb is not a read operation for that executable`);
+  }
+  assert.equal(classifyCommand("docker ps", policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand("systemctl status foo", policy).kind, "non-lifecycle");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");

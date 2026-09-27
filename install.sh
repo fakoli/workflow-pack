@@ -214,17 +214,26 @@ import re, sys
 path, tmp, block_path, bm, em, exact = sys.argv[1:7]
 text = open(path).read()
 block = open(block_path).read().rstrip("\n")
-# malformed marker-like lines (a prefix match that is not the exact
-# generated opener) are rejected — replacement never starts at a malformed
-# opener and never deletes unrelated operator instructions
-for line in text.split("\n"):
-    if line.lstrip().startswith(bm) and line != exact:
-        sys.exit("install: malformed workflow-pack marker line; refusing to replace — fix or remove it manually")
-pattern = re.compile(rf"<!-- {re.escape(bm.removeprefix('<!-- '))}[^\n]*-->.*?{re.escape(em)}", re.S)
-new, n = pattern.subn(block, text, count=1)
-if n != 1:
-    sys.exit("install: marker span replace failed; refusing to write")
-open(tmp, "w").write(new)
+# replace the EXACT validated LINE SPAN: marker-like text anywhere else
+# (inline mentions, malformed openers) is rejected — replacement never
+# starts inside an example line and never terminates at inline end-marker
+# text
+lines = text.split("\n")
+opener_idx = None
+end_idx = None
+for i, line in enumerate(lines):
+    if bm in line and line != exact:
+        sys.exit("install: malformed workflow-pack marker text; refusing to replace — fix or remove it manually")
+    if em in line and line.strip() != em:
+        sys.exit("install: inline workflow-pack end-marker text; refusing to replace — fix or remove it manually")
+    if line == exact and opener_idx is None:
+        opener_idx = i
+    if line.strip() == em and end_idx is None and opener_idx is not None:
+        end_idx = i
+if opener_idx is None or end_idx is None or end_idx < opener_idx:
+    sys.exit("install: exact marker span not found; refusing to write")
+new_lines = lines[:opener_idx] + block.split("\n") + lines[end_idx + 1:]
+open(tmp, "w").write("\n".join(new_lines))
 PY
   compute_mode="replace"
 else
