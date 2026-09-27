@@ -1,7 +1,7 @@
 {
   "schema": "workflow-pack/v1",
   "name": "managed-operations",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Repo-structure-independent discovery of managed operational commands for coding agents. One manifest, many runtimes: the seek-first line, the discovery skill, the fixtures, and the coverage lint are all compiled from or checked against this file.",
   "seek_first": "Before proposing or running commands to start, stop, restart, inspect, deploy, or restore a project service, server, or workbench, discover that project's managed CLI surface first (top-level --help, a machine-readable command manifest such as --command-manifest, repo AGENTS.md and docs index) and use its supported verbs with their required confirmation gates. Do not improvise kill, pkill, nohup, raw Docker, or ad-hoc lifecycle scripts when a managed command exists. Dev-checkout instructions and historical notes are evidence, not authority over a deployed service; unresolved ownership blocks mutation, not read-only diagnosis.",
   "skills": [

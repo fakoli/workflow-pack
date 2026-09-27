@@ -34,6 +34,9 @@ for (const [field, v] of [["name", manifest.name], ["version", manifest.version]
     bad(`manifest ${field} must be a non-empty string`);
   }
 }
+if (manifest.skills !== undefined && !Array.isArray(manifest.skills)) {
+  bad("manifest skills must be an array");
+}
 if (Array.isArray(manifest.skills)) {
   if (manifest.skills.length === 0) bad("manifest skills[] is empty");
   for (const s of manifest.skills) {
@@ -41,6 +44,9 @@ if (Array.isArray(manifest.skills)) {
       if (typeof s?.[f] !== "string" || !s[f]) bad(`manifest skill entry missing string field: ${f}`);
     }
   }
+}
+if (manifest.verb_families !== undefined && !Array.isArray(manifest.verb_families)) {
+  bad("manifest verb_families must be an array");
 }
 if (Array.isArray(manifest.verb_families)) {
   if (manifest.verb_families.length === 0) bad("manifest verb_families[] is empty");
@@ -124,7 +130,9 @@ if (!existsSync(distPath)) {
 
 // 5. fixtures referenced by the pack are well-formed
 const casesDir = join(root, "fixtures/cases");
-if (existsSync(casesDir)) {
+if (!existsSync(casesDir)) {
+  bad("fixtures/cases missing — no regression coverage");
+} else {
   const cases = readdirSync(casesDir).filter((d) => !d.startsWith("."));
   if (cases.length === 0) bad("fixtures/cases is empty — no regression coverage");
   for (const c of cases) {
@@ -140,13 +148,31 @@ if (existsSync(casesDir)) {
     }
     try {
       const expect = JSON.parse(readFileSync(expectFile, "utf8"));
-      const hasTeeth =
+      let hasTeeth = false;
+      for (const key of ["forbid_tools", "forbid_text", "require_any", "require_all"]) {
+        const arr = expect[key];
+        if (arr === undefined) continue;
+        if (!Array.isArray(arr) || arr.some((p) => typeof p !== "string" || !p)) {
+          bad(`fixture ${c}: ${key} must be an array of non-empty strings`);
+          continue;
+        }
+        for (const pat of arr) {
+          try {
+            // eslint-disable-next-line no-new -- compile check only
+            new RegExp(pat);
+          } catch {
+            bad(`fixture ${c}: ${key} pattern does not compile: ${pat}`);
+          }
+        }
+      }
+      hasTeeth =
         (expect.forbid_tools?.length ?? 0) +
           (expect.forbid_text?.length ?? 0) +
-          (expect.require_any?.length ?? 0) >
+          (expect.require_any?.length ?? 0) +
+          (expect.require_all?.length ?? 0) >
         0;
-      if (!hasTeeth) bad(`fixture ${c}: expect.json has no forbid/require patterns`);
-      else ok(`fixture ${c}: well-formed`);
+      if (hasTeeth) ok(`fixture ${c}: well-formed`);
+      else bad(`fixture ${c}: expect.json has no forbid/require patterns`);
     } catch (e) {
       bad(`fixture ${c}: expect.json does not parse (${e.message})`);
     }
@@ -184,7 +210,14 @@ if (checkInstalled) {
       } else if (text.indexOf(endMark) < text.indexOf(beginMark)) {
         bad(`end marker precedes begin marker in ${agents}`);
       } else {
-        ok(`seek-first block installed with valid marker structure in ${agents}`);
+        // the installed span itself must contain the generated block —
+        // seek_first located outside the markers is drift
+        const span = text.slice(text.indexOf(beginMark), text.indexOf(endMark) + endMark.length);
+        if (!span.includes(manifest.seek_first)) {
+          bad(`seek-first text not inside the marker span in ${agents} — run: ./install.sh`);
+        } else {
+          ok(`seek-first block installed with valid marker structure in ${agents}`);
+        }
       }
     }
   }

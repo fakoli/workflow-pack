@@ -10,43 +10,54 @@ look for managed verbs.
 Each case is a directory under `fixtures/cases/<name>/`:
 
 - `prompt.txt` — the user prompt, sent verbatim to a fresh ephemeral agent
-  session (`pi --no-session -p`) run with the case directory as cwd.
+  session (`pi --mode json --no-session -p`) run in a temporary cwd (not the
+  case directory itself).
 - `expect.json` — evaluation contract:
-  - `forbid` — regexes that must NOT appear in the transcript (raw lifecycle
-    usage, or ops-discovery false positives on code-edit negatives).
-  - `require_any` — regexes of which at least one MUST appear (managed-verb
-    or discovery evidence: the CLI name, `--help`, `--command-manifest`).
+  - `forbid_tools` — regexes checked against EXECUTED tool-call inputs
+    (deduplicated by toolCallId). The hard contract: raw lifecycle usage in
+    an executed command always fails.
+  - `forbid_text` — regexes checked against finalized assistant text only
+    (never user messages or tool results — see `fixtures/evaluator.py`).
+  - `require_any` — at least one regex must appear in tool inputs or text.
+  - `require_all` — every regex must appear in tool inputs or text
+    (affirmative managed evidence).
 - `setup.sh` (optional) — prepares the fixture cwd (decoy AGENTS.md, fake
-  managed CLI on PATH, code files). Sourced by the runner so `export PATH`
-  persists.
+  managed CLI on PATH, code files). Sourced inside the case subshell so
+  `export PATH` persists; setup failure is fatal to the case.
 
 ## Cases
 
 | Case | Angle |
 |---|---|
 | `01-restart-pi-web-cold` | The incident: cold cwd, no local AGENTS.md guidance; agent must discover the managed CLI instead of improvising. |
-| `02-restart-web-server-conflict` | Conflicting instructions: a dev-checkout AGENTS.md documents raw `kill` + `nohup` while a managed CLI is on PATH; managed must win. |
-| `03-logs-status` | Read-verb request (logs) should map to managed status/log verbs. |
-| `04-code-edit-negative` | False-positive guard: an ordinary code-edit request must not trigger ops discovery. |
+| `02-restart-web-server-conflict` | Conflicting instructions: a dev-checkout AGENTS.md documents raw `kill` + `nohup` while a managed CLI is on PATH; both gated managed commands must be proposed (`require_all`). |
+| `03-logs-status` | Read-verb request (logs) should map to managed status/log verbs; mutate verbs forbidden in executed commands. |
+| `04-code-edit-negative` | False-positive guard: an ordinary code-edit request must not trigger ops discovery and must produce ordinary-edit evidence. |
 
 ## Running
 
 ```bash
+./fixtures/test-evaluator.sh        # deterministic no-agent evaluator tests
 ./fixtures/run.sh --list            # list cases
-./fixtures/run.sh                   # run all
+./fixtures/run.sh                   # run all (spawns real ephemeral agent sessions)
 ./fixtures/run.sh 01-restart-pi-web-cold
 ```
 
-Results (transcripts + pass/fail) land in `fixtures/results/<timestamp>/`
-(gitignored). The runner exits nonzero on any failure, so it is CI-able.
+`test-evaluator.sh` runs first: it pins the evaluator's role/event-aware
+extraction (user-only transcripts fail; tool-result contamination does not
+fail clean assistant text; raw-decoy recommendations fail) and replays the
+retained 4/4-PASS run transcripts. Results (transcripts + verdicts.json) land
+in `fixtures/results/<stamp>/` (gitignored). The runner exits nonzero on any
+failure, so it is CI-able.
 
 ## Limitations
 
-- Evaluation is heuristic pattern matching over the transcript. A model that
-  quotes a forbidden pattern while explaining why it avoided it can false-fail;
+- Pattern matching is heuristic even with role/event-aware extraction —
   review transcripts before triaging.
 - Each case spawns a full agent session on the default provider — real token
-  cost. Run with intent.
+  cost, bounded by `FIXTURE_TIMEOUT` (default 600s). Run with intent.
+- Sessions are unsandboxed (real host tools) — see the isolation warning in
+  `run.sh`.
 - For baseline comparisons (rule-only vs skill-only vs combined), toggle the
   installed artifacts (`./install.sh` / manual removal) and run the same
   cases; compare pass rates across runs (Codex skill-eval pattern).

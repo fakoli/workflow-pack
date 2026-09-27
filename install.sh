@@ -4,10 +4,11 @@
 #   - installs every skill declared in the manifest (declared path -> install)
 #   - upserts the seek-first block into ~/.pi/agent/AGENTS.md
 #
-# Safety: preflights all targets before mutating; refuses symlinked targets;
-# writes unique private backups (never overwrites a same-day original);
-# replaces files atomically in the same directory; fails WITHOUT mutation on
-# malformed or duplicate seek-first markers.
+# Safety: validates the EXACT marker grammar and computes the complete
+# AGENTS.md replacement BEFORE mutating any installed target; refuses
+# symlinked targets; writes unique private backups (never overwrites a
+# same-day original); replaces files atomically in the same directory; fails
+# WITHOUT mutation on malformed or duplicate seek-first markers.
 set -euo pipefail
 umask 077
 
@@ -16,26 +17,28 @@ MANIFEST="${ROOT}/pack/workflow-pack.v1.json"
 AGENTS_MD="${HOME}/.pi/agent/AGENTS.md"
 STAMP="$(date +%Y-%m-%dT%H%M%S)-$$"
 BACKUP_DIR="${ROOT}/.backups/${STAMP}"
-BEGIN_MARK="workflow-pack:seek-first begin"
-END_MARK="workflow-pack:seek-first end"
+BEGIN_LINE_PREFIX="<!-- workflow-pack:seek-first begin"
+END_MARKER_EXACT="<!-- workflow-pack:seek-first end -->"
 
 node "${ROOT}/scripts/build.mjs"
 
-# -- preflight: marker structure (refuse to mutate on malformed input) --
+# -- preflight: marker structure with EXACT grammar (refuse to mutate on
+# malformed input; a suffixed end marker like "... end BROKEN -->" is
+# rejected here, not discovered after skills are already replaced) --
 if [[ -L "${AGENTS_MD}" ]]; then
   echo "install: refuse: ${AGENTS_MD} is a symlink" >&2
   exit 1
 fi
 if [[ -e "${AGENTS_MD}" ]]; then
-  python3 - "${AGENTS_MD}" "${BEGIN_MARK}" "${END_MARK}" <<'PY'
+  python3 - "${AGENTS_MD}" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" <<'PY'
 import sys
 path, bm, em = sys.argv[1:4]
 text = open(path).read()
-begins = text.count(f"<!-- {bm}")
-ends = text.count(f"<!-- {em}")
+begins = text.count(bm)
+ends = text.count(em)
 if begins != ends or begins > 1:
     sys.exit(f"install: malformed marker structure in {path} (begin={begins}, end={ends}); fix manually — refusing to mutate")
-if begins == 1 and text.index(f"<!-- {em}") < text.index(f"<!-- {bm}"):
+if begins == 1 and text.index(em) < text.index(bm):
     sys.exit(f"install: end marker precedes begin marker in {path}; refusing to mutate")
 PY
 fi
@@ -74,6 +77,31 @@ if [[ -e "${AGENTS_MD}" ]]; then
   cp -a "${AGENTS_MD}" "${BACKUP_DIR}/AGENTS.md"
 fi
 
+# -- compute the complete AGENTS.md replacement BEFORE mutating anything --
+if [[ ! -e "${AGENTS_MD}" ]]; then
+  mkdir -p "$(dirname "${AGENTS_MD}")"
+  : > "${AGENTS_MD}"
+fi
+block="$(cat "${ROOT}/dist/AGENTS-seek-first.md")"
+tmp_md="${AGENTS_MD}.tmp.$$"
+if grep -q "${BEGIN_LINE_PREFIX}" "${AGENTS_MD}"; then
+  python3 - "${AGENTS_MD}" "${tmp_md}" "${ROOT}/dist/AGENTS-seek-first.md" "${BEGIN_LINE_PREFIX}" "${END_MARKER_EXACT}" <<'PY'
+import re, sys
+path, tmp, block_path, bm, em = sys.argv[1:6]
+text = open(path).read()
+block = open(block_path).read().rstrip("\n")
+pattern = re.compile(rf"<!-- {re.escape(bm.removeprefix('<!-- '))}[^\n]*-->.*?{re.escape(em)}", re.S)
+new, n = pattern.subn(block, text, count=1)
+if n != 1:
+    sys.exit("install: marker span replace failed; refusing to write")
+open(tmp, "w").write(new)
+PY
+  compute_mode="replace"
+else
+  { cat "${AGENTS_MD}"; printf '\n%s\n' "${block}"; } > "${tmp_md}"
+  compute_mode="append"
+fi
+
 # -- mutate: skills (atomic same-directory replacement) --
 while IFS= read -r entry; do
   src="${entry%%|*}"
@@ -87,30 +115,11 @@ while IFS= read -r entry; do
   echo "install: skill ${name} -> ${dst}/SKILL.md"
 done <<< "${skill_entries}"
 
-# -- mutate: seek-first block (atomic; replace only the validated span) --
-if [[ ! -e "${AGENTS_MD}" ]]; then
-  mkdir -p "$(dirname "${AGENTS_MD}")"
-  : > "${AGENTS_MD}"
-fi
-block="$(cat "${ROOT}/dist/AGENTS-seek-first.md")"
-tmp_md="${AGENTS_MD}.tmp.$$"
-if grep -q "${BEGIN_MARK}" "${AGENTS_MD}"; then
-  python3 - "${AGENTS_MD}" "${tmp_md}" "${ROOT}/dist/AGENTS-seek-first.md" "${BEGIN_MARK}" "${END_MARK}" <<'PY'
-import re, sys
-path, tmp, block_path, bm, em = sys.argv[1:6]
-text = open(path).read()
-block = open(block_path).read().rstrip("\n")
-pattern = re.compile(rf"<!-- {re.escape(bm)}[^\n]*-->.*?<!-- {re.escape(em)} -->", re.S)
-new, n = pattern.subn(block, text, count=1)
-if n != 1:
-    sys.exit("install: marker span replace failed; refusing to write")
-open(tmp, "w").write(new)
-PY
-  mv "${tmp_md}" "${AGENTS_MD}"
+# -- mutate: AGENTS.md (the replacement was already computed and validated) --
+mv "${tmp_md}" "${AGENTS_MD}"
+if [[ "${compute_mode}" == "replace" ]]; then
   echo "install: seek-first block replaced in ${AGENTS_MD}"
 else
-  { cat "${AGENTS_MD}"; printf '\n%s\n' "${block}"; } > "${tmp_md}"
-  mv "${tmp_md}" "${AGENTS_MD}"
   echo "install: seek-first block appended to ${AGENTS_MD}"
 fi
 

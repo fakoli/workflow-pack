@@ -2,12 +2,14 @@
 # Cold-session fixture runner.
 #
 # Runs each case through a fresh ephemeral pi session. `--mode json` captures
-# the FULL event transcript — executed tool calls AND assistant text — so the
-# evaluation can separate what the agent DID from what it SAID.
+# the full event transcript; fixtures/evaluator.py extracts executed tool
+# inputs (deduplicated by toolCallId) and finalized assistant text — never
+# user messages or tool results — and validates transcript completion.
 #
 #   forbid_tools  — regexes checked against executed tool-call inputs
-#   forbid_text   — regexes checked against assistant text
-#   require_any   — at least one regex must appear in tool calls or text
+#   forbid_text   — regexes checked against finalized assistant text
+#   require_any   — at least one regex must appear in tool inputs or text
+#   require_all   — every regex must appear in tool inputs or text
 #
 # Usage:
 #   ./fixtures/run.sh --list          # list cases without running
@@ -17,7 +19,7 @@
 # and environment. A temp cwd and --no-session do NOT sandbox it. Run only
 # on machines where the referenced services are synthetic or where execution
 # is acceptable. Keep this test isolation separate from any production
-# guardrail.
+# guardrail. Each session is bounded by FIXTURE_TIMEOUT (seconds, default 600).
 #
 # Results land in fixtures/results/<stamp>/ (gitignored): per-case JSONL
 # transcripts plus verdicts.json.
@@ -28,6 +30,7 @@ CASES_DIR="${ROOT}/fixtures/cases"
 STAMP="$(date +%Y-%m-%dT%H%M%S)-$$"
 RESULTS_DIR="${ROOT}/fixtures/results/${STAMP}"
 PI_BIN="${PI_BIN:-pi}"
+FIXTURE_TIMEOUT="${FIXTURE_TIMEOUT:-600}"
 
 if [[ "${1:-}" == "--list" ]]; then
   for d in "${CASES_DIR}"/*/; do echo "$(basename "${d}")"; done
@@ -55,21 +58,23 @@ pi_version="$("${PI_BIN}" --version 2>/dev/null || echo unknown)"
 verdicts_jsonl="${RESULTS_DIR}/verdicts.jsonl"
 : > "${verdicts_jsonl}"
 
-# Runs setup + agent inside ONE subshell so PATH/setup leaks stop at the
-# case boundary; setup failure is fatal to the case.
+# Runs setup + agent inside ONE subshell so PATH/setup leaks stop at the case
+# boundary. Every step is explicitly checked (`|| exit 1`) — do NOT rely on
+# errexit here: `if ! run_case` suppresses errexit inside the subshell, so a
+# failed setup would otherwise still launch the real agent.
 run_case() {
   local case_dir="$1" name="$2" transcript="$3"
   local work
   work="$(mktemp -d)" || return 1
   (
-    set -e
-    cd "${work}"
+    cd "${work}" || exit 1
     if [[ -f "${case_dir}setup.sh" ]]; then
       # shellcheck disable=SC1090
-      source "${case_dir}setup.sh" "${work}"
+      source "${case_dir}setup.sh" "${work}" || exit 1
     fi
-    "${PI_BIN}" --mode json --no-session -p "$(cat "${case_dir}prompt.txt")" \
-      >"${transcript}" 2>&1
+    timeout "${FIXTURE_TIMEOUT}" \
+      "${PI_BIN}" --mode json --no-session \
+      -p "$(cat "${case_dir}prompt.txt")" >"${transcript}" 2>&1 || exit 1
   )
   local rc=$?
   rm -rf "${work}"
@@ -102,66 +107,13 @@ for d in "${CASES_DIR}"/*/; do
   echo "== ${name}"
   transcript="${RESULTS_DIR}/${name}.transcript.jsonl"
   if ! run_case "${d}" "${name}" "${transcript}"; then
-    echo "   FAIL (agent exited nonzero — see ${transcript})"
-    record "${name}" "FAIL" '["agent exited nonzero"]'
+    echo "   FAIL (agent exited nonzero, setup failed, or timed out — see ${transcript})"
+    record "${name}" "FAIL" '["agent exited nonzero, setup failed, or timed out"]'
     fail=$((fail + 1))
     continue
   fi
 
-  verdict="$(python3 - "${d}expect.json" "${transcript}" "${name}" "${verdicts_jsonl}" <<'PY'
-import json, re, sys
-
-expect = json.load(open(sys.argv[1]))
-
-tool_inputs, texts = [], []
-
-def walk(o):
-    if isinstance(o, dict):
-        name = o.get("tool") or o.get("toolName") or o.get("name")
-        if isinstance(name, str) and name.lower() in (
-            "bash", "read", "edit", "write", "grep", "find", "apply_patch",
-        ):
-            inp = o.get("input") or o.get("arguments") or o.get("args") or {}
-            if isinstance(inp, dict):
-                tool_inputs.append(json.dumps(inp))
-            elif isinstance(inp, str):
-                tool_inputs.append(inp)
-        for k, v in o.items():
-            if k in ("text", "content", "message") and isinstance(v, str):
-                texts.append(v)
-            else:
-                walk(v)
-    elif isinstance(o, list):
-        for x in o:
-            walk(x)
-
-for line in open(sys.argv[2], encoding="utf-8", errors="replace"):
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        walk(json.loads(line))
-    except Exception:
-        continue
-
-joined_tools = "\n".join(tool_inputs)
-joined_text = "\n".join(texts)
-problems = []
-for pat in expect.get("forbid_tools", []):
-    if re.search(pat, joined_tools):
-        problems.append(f"forbidden tool usage: {pat!r}")
-for pat in expect.get("forbid_text", []):
-    if re.search(pat, joined_text):
-        problems.append(f"forbidden pattern in assistant text: {pat!r}")
-req = expect.get("require_any", [])
-if req and not any(re.search(p, joined_tools + "\n" + joined_text) for p in req):
-    problems.append(f"no required evidence in tool calls or text: {req}")
-row = {"case": sys.argv[3], "verdict": "PASS" if not problems else "FAIL", "problems": problems}
-with open(sys.argv[4], "a") as f:
-    f.write(json.dumps(row) + "\n")
-print("PASS" if not problems else "FAIL: " + "; ".join(problems))
-PY
-)"
+  verdict="$(python3 "${ROOT}/fixtures/evaluator.py" "${d}expect.json" "${transcript}" "${name}" "${verdicts_jsonl}")"
   echo "   ${verdict}"
   if [[ "${verdict}" == PASS* ]]; then
     pass=$((pass + 1))
@@ -170,8 +122,9 @@ PY
   fi
 done
 
+# Final artifact: atomic write; row count must equal cases run (fail-closed).
 python3 - "${RESULTS_DIR}/verdicts.json" "${pi_version}" "${ran}" "${verdicts_jsonl}" <<'PY'
-import json, sys
+import json, os, sys
 rows = []
 try:
     for line in open(sys.argv[4]):
@@ -180,10 +133,17 @@ try:
             rows.append(json.loads(line))
 except FileNotFoundError:
     pass
-json.dump({"pi_version": sys.argv[2], "cases_run": int(sys.argv[3]), "results": rows},
-          open(sys.argv[1], "w"), indent=2)
+ran = int(sys.argv[3])
+if len(rows) != ran:
+    print(f"results: row count {len(rows)} != cases run {ran}", file=sys.stderr)
+    sys.exit(1)
+tmp = sys.argv[1] + ".tmp"
+with open(tmp, "w") as f:
+    json.dump({"pi_version": sys.argv[2], "cases_run": ran, "results": rows}, f, indent=2)
+os.replace(tmp, sys.argv[1])
 PY
+final_rc=$?
 
 echo ""
 echo "results: ${RESULTS_DIR}  (pass ${pass} / fail ${fail} / ran ${ran})"
-[[ ${ran} -gt 0 && ${fail} -eq 0 ]]
+[[ ${ran} -gt 0 && ${fail} -eq 0 && ${final_rc} -eq 0 ]]
