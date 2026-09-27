@@ -372,6 +372,41 @@ check("read-executable long options are not silently safe", () => {
   }
   assert.equal(classifyCommand("ls -la", policy).kind, "non-lifecycle", "short option clusters remain supported read forms");
 });
+check("read-executable argument list is validated in full", () => {
+  for (const cmd of ["date -s 2000-01-01", "date -u --set=2000-01-01", "rg -n --pre custom-hook pattern file", "rg pattern --pre custom-hook file"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: mutating/launching options anywhere are unsupported read forms`);
+  }
+  assert.equal(classifyCommand("ls -la", policy).kind, "non-lifecycle");
+  assert.equal(classifyCommand("date -u", policy).kind, "non-lifecycle", "date -u is a read-only modifier");
+});
+check("probe/read shortcuts require complete forms", () => {
+  for (const cmd of ["pkill -0 --signal 9 node", "kill -0 --unsupported 123", "systemctl status --future-flag foo.service", "systemctl status *.service"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: trailing options/unsupported operands escape the shortcut`);
+  }
+  const compound = classifyCommand("kill 1; pkill -0 --signal 9 node", policy);
+  assert.equal(
+    targetConfidence({ classification: compound, verifiedTarget: { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true } }),
+    "candidate",
+    "a misclassified tail must not verify the compound"
+  );
+  assert.equal(classifyCommand("pkill -0 node", policy).kind, "non-lifecycle", "a clean probe is still a probe");
+});
+check("option arities and required operands (no invented targets)", () => {
+  const vt = { target: "service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x", resolved: true };
+  for (const cmd of ["systemctl restart -t service", "docker stop -t 5", "systemctl restart foo.service)", "kill --signal", "kill -Z 1"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: option values/missing operands/unsupported syntax are not targets`);
+    assert.equal(c.explicitTargets.length, 0, `${cmd}: no invented target identity`);
+    assert.notEqual(targetConfidence({ classification: c, verifiedTarget: vt }), "verified");
+  }
+  // supported value-taking and boolean options still classify
+  assert.equal(classifyCommand("kill -s 9 123", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("kill --signal 9 123", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("pkill -s 9 node", policy).kind, "lifecycle");
+  assert.equal(classifyCommand("docker rm -f web", policy).kind, "lifecycle");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
