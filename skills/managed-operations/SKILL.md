@@ -1,6 +1,6 @@
 ---
 name: managed-operations
-description: Finds supported project CLI commands for starting, stopping, restarting, checking, troubleshooting, deploying, or restoring local services, servers, dev workbenches, and model serves. Use when asked what command to run for a service status check, logs, restart, rebuild, deploy, or any operational/lifecycle action (for example "restart the web server", "bring pi-web back up", "show service logs"), even if the user does not mention a CLI or product name. Check the managed command surface before suggesting kill, pkill, nohup, raw Docker, or ad-hoc shell; do not invoke for ordinary application code edits or test fixtures.
+description: Finds supported project CLI commands to start, stop, restart, check, troubleshoot, deploy, or restore local services, servers, dev workbench, and model serves. Use when asked what command to run for a service status check, logs, restart, rebuild, deploy, or any operational/lifecycle action (for example "restart the web server", "bring pi-web back up", "show service logs"), even if the user does not mention a CLI or product name. Check the managed command surface before suggesting kill, pkill, nohup, raw Docker, or ad-hoc shell; do not invoke for ordinary application code edits or test fixtures.
 ---
 
 # Managed operations discovery
@@ -16,8 +16,9 @@ managed command.
   user asks for advice or for execution.
 - Any request that names a lifecycle verb without naming the owning CLI.
 
-Not for ordinary application code edits, test fixtures, or one-off scripts
-the user explicitly asks you to write.
+Not for ordinary application code edits or test fixtures. If the user asks
+for a script that performs a lifecycle action, still resolve the managed
+command first — the script should wrap the managed verb, not reimplement it.
 
 ## Discover
 
@@ -54,11 +55,12 @@ the user explicitly asks you to write.
 
 ## No managed verb found
 
-- Say so explicitly and state the uncertainty. Look for repo docs, a docs
-  index, or the owning product before improvising.
-- Raw shell is acceptable only for the narrowest read-only diagnosis when the
-  product surface itself is broken — and record the missing managed
-  capability as a product gap.
+- Say so explicitly and state the uncertainty. Distinguish three cases:
+  the owning CLI is unknown (look for repo docs, a docs index, or the owning
+  product before improvising); the service is genuinely unmanaged (raw shell
+  may be appropriate — say why); the managed surface exists but is broken
+  (raw shell only for the narrowest read-only diagnosis, and record the
+  missing managed capability as a product gap).
 - Do not fabricate verb names, flags, or confirmation syntax.
 
 ## Boundaries

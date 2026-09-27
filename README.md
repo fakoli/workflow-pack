@@ -8,8 +8,8 @@ managed CLI exists but nothing in the agent's always-in-context layer says to
 look for it. This pack closes that gap with three layers compiled from — or
 checked against — one declarative manifest:
 
-1. **Seek-first line** — a ~65-token heuristic compiled into the global
-   `AGENTS.md` (always in context, where the failure happened).
+1. **Seek-first line** — a small (~90-word) heuristic compiled into the
+   global `AGENTS.md` (always in context, where the failure happened).
 2. **Discovery skill** — an Agent-Skills-standard skill (`managed-operations`)
    whose description triggers on operational questions ("what command do I
    run to restart…") and whose body is a decision procedure
@@ -22,11 +22,11 @@ checked against — one declarative manifest:
 
 Hand-written prose is exactly what drifts. The manifest is the single source
 of truth: `scripts/build.mjs` compiles the AGENTS.md block from it, and
-`lint/check.mjs` fails when skills, compiled artifacts, or installed targets
-drift. (Compile-step pattern: Agent OS profiles. Coverage-gate pattern:
-agent-config linters — none of which check trigger-description coverage
-against a command-surface index, the exact failure class that caused the
-original incident.)
+`lint/check.mjs` fails when skills, compiled artifacts, fixtures, or
+installed targets drift. (Compile-step pattern: Agent OS profiles.
+Coverage-gate pattern: agent-config linters — which, as far as we could
+find, do not check trigger-description coverage against a command-surface
+index, the failure class that caused the original incident.)
 
 ## Layout
 
@@ -39,6 +39,14 @@ install.sh                   idempotent install into harness dirs
 fixtures/                    cold-session regression cases + runner
 ```
 
+## Prerequisites
+
+- Node.js 20+ (build + lint), bash, python3 (installer + runner).
+- [pi](https://github.com/badlogic/pi-mono) for the discovery skill to be
+  picked up (Agent Skills standard: `~/.agents/skills/`) and for fixtures.
+- On a fresh clone, run `node scripts/build.mjs` before
+  `node lint/check.mjs` (the lint checks dist freshness).
+
 ## Install
 
 ```bash
@@ -46,8 +54,18 @@ fixtures/                    cold-session regression cases + runner
 node lint/check.mjs --installed       # verify installed targets match the repo
 ```
 
-`install.sh` backs up `~/.pi/agent/AGENTS.md` to `.backups/<date>/` before
-writing and upserts a marker-delimited block, so re-running is safe.
+`install.sh` backs up `~/.pi/agent/AGENTS.md` and any existing skill to
+`.backups/<stamp>/` (mode 0700) before writing, refuses symlinked targets,
+and upserts a marker-delimited block — re-running is safe, and malformed
+marker structures abort without mutation.
+
+## Uninstall
+
+```bash
+rm -rf ~/.agents/skills/managed-operations
+# then delete the marker-delimited block from ~/.pi/agent/AGENTS.md
+# (between the "workflow-pack:seek-first begin/end" comments)
+```
 
 ## Fixtures
 
@@ -58,17 +76,25 @@ writing and upserts a marker-delimited block, so re-running is safe.
 ```
 
 See `fixtures/README.md` for the case format and limitations. Each case costs
-a full agent session — run with intent.
+a full agent session — run with intent. The runner captures the full event
+transcript (`--mode json`) and evaluates executed tool calls separately from
+assistant text, so a PASS attests what the agent did, not just what it said.
+Fixtures run with the host's real tools (no sandbox) — see the isolation
+warning in `fixtures/run.sh`.
 
 ## Lint
 
 ```bash
-node lint/check.mjs              # manifest schema, skill frontmatter,
-                                 # trigger coverage, dist freshness
-node lint/check.mjs --installed  # + installed skill/AGENTS.md drift
+node lint/check.mjs              # manifest schema/types/cardinality, skill
+                                 # frontmatter, word-boundary trigger coverage,
+                                 # dist freshness, fixture well-formedness
+node lint/check.mjs --installed  # + installed skill/AGENTS.md marker drift
 ```
 
-Exit 1 with findings; CI-able.
+Exit 1 with findings; CI-able. This is lexical coverage checking, not
+behavioral validation — skill triggering remains model- and
+harness-dependent (pi's own docs note models do not always load matching
+skills).
 
 ## Manifest format (workflow-pack/v1)
 
@@ -77,8 +103,15 @@ Exit 1 with findings; CI-able.
 - `verb_families[]` — per product CLI: discovery command, machine-readable
   manifest command, trigger phrases (must be covered by skill descriptions),
   failure classes, and sourced example invocations.
-- `policy` — soft/hard deny vocabulary reserved for the enforcement layer
-  (out of scope for v0.1).
+- `policy` — inert reserved metadata for the enforcement layer (out of scope
+  for v0.1; no runtime consumes it yet).
+
+## Status
+
+Preliminary. Evidence so far: lexical lint clean, and one real fixture run
+(incident replay) where the agent proposed the managed verbs. Not yet
+evidence of repeatability or ablation — run the fixtures before/after
+toggling the installed artifacts to compare.
 
 ## Roadmap
 
