@@ -114,6 +114,23 @@ deliberately small command recognizer:
 Do not claim comprehensive shell coverage. Ambiguous cases must be visible
 in the audit rather than silently treated as confidently safe.
 
+**Coverage boundary (Milestone 1 contract).** The recognizer is bounded and
+best-effort by design:
+
+- Confident classifications require an explicit, complete supported
+  executable/argument grammar; verified ownership requires a completely
+  supported single form (`kind === "lifecycle"`, no nested-execution
+  structure). Uncertain classifications cap at `candidate`.
+- Unsupported syntax — brace/glob expansion, escaped or concatenated
+  executable words, multiple targets, redirects on mutations, indirection,
+  environment prefixes — always remains uncertain and never invents target
+  identity or a confident read-only classification.
+- Nested-execution detection (`lifecycleInside`) is best-effort, not
+  comprehensive: wrapped commands (`sh -c`), newline-separated commands
+  inside double-quoted substitutions, and deeply nested substitutions may
+  be missed while the overall classification stays uncertain (hold, never
+  allow).
+
 ### 3.2 Target-confidence levels
 
 | Confidence | Meaning | Enforcement use |

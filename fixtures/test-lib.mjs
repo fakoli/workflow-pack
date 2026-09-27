@@ -283,6 +283,47 @@ check("read-verb redirect stays uncertain without an invented mutation", () => {
   const shadow = decide({ classification: c, confidence: "stale", mode: "shadow", policy });
   assert.equal(shadow.action, "log-uncertainty", "no ownership hold without a recognized mutation");
 });
+check("nested/unsupported mutations never verify with one binding (complete-form cap)", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["kill 1; echo $(kill 2)", "kill 1; $(kill 2)", 'kill 1; sh -c "kill 2"', "kill 1; FOO=x kill 2"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(
+      targetConfidence({ classification: c, verifiedTarget: vt }),
+      "candidate",
+      `${cmd}: nested/unsupported structure caps below verified`
+    );
+  }
+  // a completely supported single form still verifies
+  const simple = classifyCommand("kill 1", policy);
+  assert.equal(targetConfidence({ classification: simple, verifiedTarget: vt }), "verified");
+});
+check("expansion/glob operands are never invented explicit targets", () => {
+  const vt = { target: "{a,b}.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x", resolved: true };
+  for (const cmd of ["systemctl restart {a,b}.service", "systemctl restart *.service", "systemctl restart foo\\.service"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "uncertain", `${cmd}: expansion/glob/escape is unsupported`);
+    assert.equal(c.explicitTargets.length, 0, `${cmd}: no invented target identity`);
+    assert.equal(targetConfidence({ classification: c, verifiedTarget: vt }), "candidate", "bound evidence on an unsupported form caps at candidate, never verified");
+  }
+});
+check("concatenated executable word is not a confident read-only classification", () => {
+  const c = classifyCommand('echo"/custom" arg', policy);
+  assert.equal(c.kind, "uncertain", "the complete word is echo\"/custom\", not echo");
+});
+check("read-verb semantics are per executable (pkill status is a mutation)", () => {
+  const redirect = classifyCommand("pkill status >log", policy);
+  assert.equal(redirect.operationCount, 1, "pkill status is a recognized mutation, not a read verb");
+  for (const cmd of ["echo $(pkill status)", "echo $(killall status)"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.lifecycleInside, true, `${cmd} runs a mutation`);
+  }
+  const read = classifyCommand("systemctl status foo.service", policy);
+  assert.equal(read.kind, "non-lifecycle", "systemctl status IS a read verb");
+});
+check("quoted separator inside a substitution is argument text, not a command separator", () => {
+  const c = classifyCommand('echo $(echo "x; kill 1")', policy);
+  assert.equal(c.lifecycleInside, false, "the shell executes echo; kill 1 is quoted argument text");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");

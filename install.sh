@@ -282,12 +282,14 @@ while IFS= read -r entry; do
         mv "${adst}" "${old}"
       fi
       if mv "${stage}" "${adst}"; then
-        rm -rf "${old}"
+        # register the completed replacement BEFORE fallible cleanup so the
+        # EXIT trap always knows the asset was replaced
         if [[ -d "${BACKUP_DIR}/extensions/${name}/$(basename "${asset}")" ]]; then
           MUTATED+=("${adst}|${BACKUP_DIR}/extensions/${name}/$(basename "${asset}")")
         else
           CREATED+=("${adst}")
         fi
+        rm -rf "${old}" || echo "install: could not remove staged backup ${old}" >&2
       else
         if [[ -d "${old}" ]]; then
           if mv "${old}" "${adst}"; then
