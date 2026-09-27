@@ -219,17 +219,76 @@ check("compound with multiple matched rules: single-operation evidence is never 
   const c = classifyCommand("systemctl restart foo.service; kill 123", policy);
   assert.equal(c.ruleIds.length, 2);
   assert.equal(
-    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "x" } }),
+    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x" } }),
     "candidate",
     "evidence binds one operation; the kill's unresolved PID is not covered"
   );
+});
+check("multiline quoting: quoted # spanning lines is not a comment", () => {
+  const c = classifyCommand("echo '\n#'; kill 1", policy);
+  assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");
+});
+check("redirect/multi-target branches retain recognized mutations (stale authority holds)", () => {
+  for (const cmd of ["kill 1 > log", "systemctl restart foo.service 2>/dev/null", "systemctl restart foo.service bar"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.notEqual(c.kind, "non-lifecycle", cmd);
+    const shadow = decide({ classification: c, confidence: "stale", mode: "shadow", policy });
+    assert.equal(shadow.action, "log-degradation", `${cmd} with stale authority must log degradation, not generic uncertainty`);
+    const enforce = decide({ classification: c, confidence: "stale", mode: "enforce", policy });
+    assert.equal(enforce.action, "ownership-hold", `${cmd} with stale authority must hold`);
+  }
+});
+check("single-binding evidence never verifies multiple mutations or targets", () => {
+  for (const cmd of ["kill 1; kill 2", "kill 1 2", "systemctl restart foo.service; systemctl stop foo.service"]) {
+    const c = classifyCommand(cmd, policy);
+    const conf = targetConfidence({ classification: c, verifiedTarget: { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true } });
+    assert.notEqual(conf, "verified", `${cmd}: one binding cannot verify multiple mutations/targets`);
+  }
+  // lifecycle compounds with a single binding are candidate, never verified
+  const compound = classifyCommand("systemctl restart foo.service; systemctl stop foo.service", policy);
+  assert.equal(
+    targetConfidence({ classification: compound, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x" } }),
+    "candidate"
+  );
+});
+check("adjacent substitutions preserve boundaries: echo $(true)$(kill 1) → lifecycleInside", () => {
+  const c = classifyCommand("echo $(true)$(kill 1)", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, true, "adjacent substitution bodies must not concatenate into one word");
+});
+check("trailing literal after a substitution is not executing content", () => {
+  const c = classifyCommand('echo "$(date) kill 1"', policy);
+  assert.equal(c.lifecycleInside, false, "kill 1 is literal text outside the substitution");
+});
+check("probe with harmless substitution is not a mutation: kill -0 $(date)", () => {
+  const c = classifyCommand("kill -0 $(date)", policy);
+  assert.equal(c.lifecycleInside, false, "signal 0 sends nothing; the substitution is harmless");
+});
+check("read verb with harmless substitution is not a mutation: systemctl status $(date)", () => {
+  const c = classifyCommand("systemctl status $(date)", policy);
+  assert.equal(c.lifecycleInside, false);
+});
+check("substitution whose content echoes a quoted kill is not a mutation", () => {
+  const c = classifyCommand('echo $(echo "kill 1")', policy);
+  assert.equal(c.lifecycleInside, false, "the substitution runs echo, not kill");
+});
+check("operation binding records the verb (restart vs kill)", () => {
+  const c = classifyCommand("systemctl restart foo.service", policy);
+  assert.deepEqual(c.operations, ["restart"]);
+  const k = classifyCommand("kill -9 123", policy);
+  assert.deepEqual(k.operations, ["kill"]);
+});
+check("kill 1 2 → uncertain multi-target (never partially verified)", () => {
+  const c = classifyCommand("kill 1 2", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.multiTarget, true);
 });
 check("systemctl restart foo.service; systemctl stop bar: two targets, one binding → candidate, never verified", () => {
   const c = classifyCommand("systemctl restart foo.service; systemctl stop bar", policy);
   assert.equal(c.kind, "lifecycle");
   assert.equal(c.explicitTargets.length, 2);
   assert.equal(
-    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "x" } }),
+    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "x" } }),
     "candidate",
     "one binding cannot cover two affected targets"
   );
@@ -343,20 +402,20 @@ check("kill with bare PID → unknown", () => {
 check("bound evidence object (target + ruleId + evidence) → verified", () => {
   const c = classifyCommand("systemctl restart foo.service", policy);
   assert.equal(
-    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "pi-web-status resolved anvil-pi-web.service" } }),
+    targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", operation: "restart", evidence: "pi-web-status resolved anvil-pi-web.service" } }),
     "verified"
   );
 });
 check("evidence missing the ruleId binding (operation mismatch) → candidate, never verified", () => {
   const c = classifyCommand("systemctl restart foo.service", policy);
-  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "container-engine-lifecycle", evidence: "x" } }), "candidate");
-  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", evidence: "status-only" } }), "candidate");
+  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "container-engine-lifecycle", operation: "restart", evidence: "x" } }), "candidate");
+  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "foo.service", ruleId: "service-manager-lifecycle", evidence: "status-only" } }), "candidate");
 });
 check("bare PID requires an explicit resolution binding (resolved: true)", () => {
   const c = classifyCommand("kill -9 123", policy);
   assert.equal(c.explicitTargets.length, 0);
-  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "web-server", ruleId: "raw-process-kill", evidence: "pgrep resolved pid 123 to web-server" } }), "unknown");
-  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "web-server", ruleId: "raw-process-kill", evidence: "pgrep resolved pid 123 to web-server", resolved: true } }), "verified");
+  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "web-server", ruleId: "raw-process-kill", operation: "kill", evidence: "pgrep resolved pid 123 to web-server" } }), "unknown");
+  assert.equal(targetConfidence({ classification: c, verifiedTarget: { target: "web-server", ruleId: "raw-process-kill", operation: "kill", evidence: "pgrep resolved pid 123 to web-server", resolved: true } }), "verified");
 });
 check("unrelated target name in evidence object → candidate, never verified", () => {
   const c = classifyCommand("systemctl restart foo.service", policy);

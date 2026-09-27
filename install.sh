@@ -151,6 +151,7 @@ fi
 if [[ ! -e "${AGENTS_MD}" ]]; then
   mkdir -p "$(dirname "${AGENTS_MD}")"
   : > "${AGENTS_MD}"
+  CREATED+=("${AGENTS_MD}")
 fi
 block="$(cat "${ROOT}/dist/AGENTS-seek-first.md")"
 tmp_md="${AGENTS_MD}.tmp.$$"
@@ -190,8 +191,18 @@ rollback_mutations() {
     path="${pair%%|*}"
     bak="${pair#*|}"
     if [[ -e "${bak}" ]]; then
-      if mkdir -p "$(dirname "${path}")" && cp -a "${bak}" "${path}"; then
-        restored=$((restored + 1))
+      if mkdir -p "$(dirname "${path}")"; then
+        # a directory backup must REPLACE the destination tree, not copy
+        # inside it
+        if [[ -d "${bak}" && -d "${path}" ]]; then
+          rm -rf "${path}"
+        fi
+        if cp -a "${bak}" "${path}"; then
+          restored=$((restored + 1))
+        else
+          failed=$((failed + 1))
+          echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
+        fi
       else
         failed=$((failed + 1))
         echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
@@ -199,7 +210,9 @@ rollback_mutations() {
     fi
   done
   for path in "${CREATED[@]}"; do
-    rm -rf "${path}"
+    if ! rm -rf "${path}"; then
+      echo "install: rollback could not remove created path ${path}" >&2
+    fi
   done
   echo "install: FAILED (exit ${rc}) after partial mutation; rolled back ${restored} replaced path(s), removed ${#CREATED[@]} created path(s)" >&2
   echo "install: preflight backups retained at ${BACKUP_DIR} for manual recovery" >&2

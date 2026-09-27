@@ -87,6 +87,18 @@ rm -rf "${HOME}"; mkdir -p "${HOME}"
 (cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "fresh install exits 0" "$?"
 [[ -f "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib/guardrail.mjs" ]]; check "lib asset installed" "$?"
 
+# -- 6b. restoration of distinguishable content after a completed skill
+# replacement: tamper the installed skill, make the extension source
+# unreadable, and verify rollback restores the pre-run (tampered) content --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-restore fresh install exits 0" "$?"
+printf 'TAMPERED-MARKER\n' > "${HOME}/.agents/skills/managed-operations/SKILL.md"
+chmod 000 "${ROOT}/extensions/pi-workflow-pack/index.ts"
+if (cd "${ROOT}" && ./install.sh >"${work}/restore.log" 2>&1); then r=1; else r=0; fi
+chmod 644 "${ROOT}/extensions/pi-workflow-pack/index.ts"
+check "extension-source failure exits nonzero" "$r"
+[[ "$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md")" == "TAMPERED-MARKER" ]]; check "rollback restored distinguishable pre-run content (not repo bytes)" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"
