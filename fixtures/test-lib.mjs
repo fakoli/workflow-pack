@@ -822,6 +822,67 @@ check("round 17: targets retain exact non-shell-whitespace identity", () => {
     assert.equal(decide({ classification: c, confidence: conf, mode: "shadow", policy }).action, "log-uncertainty");
   }
 });
+check("round 18: launchctl kill rejects unsupported positional signal bytes without losing the mutation", () => {
+  const signals = ["TERM!", "SIG-TERM", "TERM.name", "TERM/name", "TERM_name", "term", "9TERM", "+9"];
+  for (const ch of ["\r", "\v", "\f", "\u00a0"]) {
+    signals.push(`TERM${ch}`, `SIGTERM${ch}`, `15${ch}`, `${ch}TERM`, `TE${ch}RM`);
+  }
+  for (const signal of signals) {
+    const command = `launchctl kill ${signal} system/web`;
+    const c = classifyCommand(command, policy);
+    assert.equal(c.kind, "uncertain", JSON.stringify(command));
+    assert.equal(c.lifecycleInside, true, "unsupported signal retains the recognized mutation");
+    assert.deepEqual(c.ruleIds, ["service-manager-lifecycle"]);
+    assert.deepEqual(c.operations, ["kill"]);
+    assert.equal(c.operationCount, 1);
+    assert.deepEqual(c.explicitTargets, [], "an unsupported signal must not expose a verifiable target");
+    assert.equal(targetConfidence({ classification: c }), "unknown");
+    const confidence = targetConfidence({ classification: c, verifiedTarget: {
+      target: "system/web", ruleId: "service-manager-lifecycle", operation: "kill",
+      evidence: "synthetic service authority", resolved: true,
+    } });
+    assert.equal(confidence, "candidate", "even resolved service evidence cannot verify an unsupported signal");
+    for (const suppliedConfidence of ["unknown", confidence, "verified"]) {
+      const input = { classification: c, confidence: suppliedConfidence, policy };
+      const enforce = decide({ ...input, mode: "enforce" });
+      assert.equal(enforce.action, "ownership-hold");
+      assert.equal(enforce.reasonCode, "indirected-lifecycle", "the hold follows recognized uncertainty, not missing alternatives");
+      assert.equal(decide({ ...input, mode: "shadow" }).action, "log-uncertainty");
+    }
+  }
+});
+check("round 18: supported launchctl signal spellings preserve service target binding", () => {
+  for (const signal of ["TERM", "SIGTERM", "HUP", "USR1", "SIGUSR2", "0", "9", "15", "0009"]) {
+    const c = classifyCommand(`launchctl kill ${signal} system/web`, policy);
+    assert.equal(c.kind, "lifecycle", signal);
+    assert.equal(c.lifecycleInside, false);
+    assert.deepEqual(c.operations, ["kill"]);
+    assert.equal(c.operationCount, 1);
+    assert.deepEqual(c.explicitTargets, ["system/web"], "the signal is never the target");
+    const evidence = {
+      ruleId: "service-manager-lifecycle", operation: "kill",
+      evidence: "synthetic service authority", resolved: true,
+    };
+    assert.equal(targetConfidence({ classification: c, verifiedTarget: { ...evidence, target: "system/web" } }), "verified");
+    assert.equal(targetConfidence({ classification: c, verifiedTarget: { ...evidence, target: signal } }), "candidate");
+    assert.equal(classifyCommand(`launchctl kill ${signal}`, policy).kind, "uncertain", "a signal alone is incomplete");
+    assert.equal(classifyCommand(`launchctl kill ${signal} system/web extra`, policy).kind, "uncertain", "extra operands remain unsupported");
+  }
+});
+check("round 18: unsupported launchctl signals cannot verify a compound through other service evidence", () => {
+  for (const ch of ["\r", "\v", "\f", "\u00a0"]) {
+    const c = classifyCommand(`systemctl restart foo.service; launchctl kill TERM${ch} system/web`, policy);
+    assert.equal(c.kind, "uncertain");
+    assert.equal(c.lifecycleInside, true);
+    assert.equal(c.operationCount, 2, "both mutation attempts remain recognized");
+    assert.deepEqual(c.operations, ["restart", "kill"]);
+    assert.deepEqual(c.explicitTargets, ["foo.service"], "only the supported segment exposes a target");
+    const confidence = targetConfidence({ classification: c, verifiedTarget: serviceOnlyEvidence });
+    assert.equal(confidence, "candidate");
+    assert.equal(decide({ classification: c, confidence, mode: "enforce", policy }).action, "ownership-hold");
+    assert.equal(decide({ classification: c, confidence, mode: "shadow", policy }).action, "log-uncertainty");
+  }
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");

@@ -11,9 +11,15 @@ foundation: evaluator activity requirement, runner fail-closed metadata,
 installer exact marker grammar + ancestor-symlink refusal) shipped with the
 design.
 
-## Shipped
+## Shared-contract implementation (shadow-only)
 
 ### v0.3.0 — Milestone 1: shared contract (design sequencing step 2)
+
+Implementation closeout and deterministic verification are recorded in
+[the retrospective](RETROSPECTIVE-shared-contract.md). The last review's
+positional-signal finding is addressed; no subsequent model-review PASS or
+live enforcement qualification is claimed. Draft PR review remains the
+human acceptance gate.
 
 - `lib/guardrail.mjs` — pure command classification (supported /
   non-lifecycle / uncertain, read-executable and read-verb negatives,
@@ -28,13 +34,19 @@ design.
 - Manifest: `policy.contract_version`, `policy.default_mode: shadow`,
   `policy.rules[]` (stable IDs, severity, eligibility), argv arrays,
   `registry_contract`, `ownership_contract`.
-- Deterministic pure tests: `node fixtures/test-lib.mjs` (178 checks,
-  including the adversarial regression corpus from five Astra review
-  rounds: executing substitutions, compound hard-rule ordering,
-  operation-bound ownership evidence, integrity holds, object-shaped
-  registry validation).
+- Deterministic pure tests: `node fixtures/test-lib.mjs` (181 checks),
+  including executing substitutions, compound hard-rule ordering,
+  operation-bound ownership evidence, integrity holds, registry validation,
+  and byte-exact positional signal spelling.
+- Independent fixed-corpus Bash argv oracle:
+  `node fixtures/test-shell-boundaries.mjs` (35 checks; all command names
+  are inert functions, with no lifecycle execution).
+- One fail-fast verification command: `./fixtures/check-contract.sh`.
+  Installed lint uses a temporary HOME; no agent sessions or live install.
 - Installer installs `lib/` alongside the extension; lint checks lib-asset
   drift.
+
+## Shipped
 
 ### v0.1.x
 
