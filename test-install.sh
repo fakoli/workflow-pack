@@ -99,6 +99,31 @@ chmod 644 "${ROOT}/extensions/pi-workflow-pack/index.ts"
 check "extension-source failure exits nonzero" "$r"
 [[ "$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md")" == "TAMPERED-MARKER" ]]; check "rollback restored distinguishable pre-run content (not repo bytes)" "$?"
 
+# -- 6c. restoration of a REPLACED DIRECTORY TREE with distinguishable
+# content: tamper the installed lib, then make the AGENTS.md mv fail via a
+# PATH shim AFTER skills/index.ts/lib were replaced — rollback must restore
+# the pre-run lib tree (marker file intact) --
+rm -rf "${HOME}"; mkdir -p "${HOME}"
+(cd "${ROOT}" && ./install.sh >/dev/null 2>&1); check "pre-dir-restore fresh install exits 0" "$?"
+printf 'DIR-TAMPER-MARKER\n' > "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib/TAMPERED"
+REAL_MV="$(command -v mv)"
+shim="${work}/shim"; mkdir -p "${shim}"
+cat > "${shim}/mv" <<SHIM
+#!/bin/sh
+for arg in "\$@"; do
+  case "\${arg}" in
+    */AGENTS.md.tmp*) exit 1 ;;
+  esac
+done
+exec "${REAL_MV}" "\$@"
+SHIM
+chmod +x "${shim}/mv"
+if (cd "${ROOT}" && PATH="${shim}:${PATH}" ./install.sh >"${work}/dir-restore.log" 2>&1); then r=1; else r=0; fi
+check "AGENTS.md mv failure exits nonzero" "$r"
+grep -q "rolled back" "${work}/dir-restore.log"; check "recovery summary reported" "$?"
+[[ -f "${HOME}/.pi/agent/extensions/pi-workflow-pack/lib/TAMPERED" ]]; check "rollback restored the replaced lib DIRECTORY tree (marker intact)" "$?"
+[[ "$(cat "${HOME}/.agents/skills/managed-operations/SKILL.md" 2>/dev/null | head -1)" != "" ]]; check "skill also restored after directory rollback" "$?"
+
 # -- 5. symlinked ANCESTOR directory is refused (no preflight mutation) --
 h2="${work}/home2"
 mkdir -p "${h2}/.pi/agent-real"

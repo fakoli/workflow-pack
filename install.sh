@@ -147,6 +147,59 @@ if [[ -e "${AGENTS_MD}" ]]; then
   cp -a "${AGENTS_MD}" "${BACKUP_DIR}/AGENTS.md"
 fi
 
+# -- mutation tracking and rollback trap: installed BEFORE the first
+# mutation (fresh AGENTS.md creation). Every replaced path that had a
+# preflight backup is restored from it (recorded as path|backup pairs);
+# paths created fresh (no backup) are removed. Surviving backups are always
+# reported so manual recovery stays possible. --
+MUTATED=()   # path|backup pairs written during this run
+CREATED=()   # paths created fresh (no prior version to restore)
+
+rollback_mutations() {
+  local rc=$?
+  if [[ ${rc} -eq 0 ]]; then
+    trap - EXIT
+    return 0
+  fi
+  local restored=0 failed=0 pair path bak
+  for pair in "${MUTATED[@]}"; do
+    path="${pair%%|*}"
+    bak="${pair#*|}"
+    if [[ -e "${bak}" ]]; then
+      if mkdir -p "$(dirname "${path}")"; then
+        # a directory backup must REPLACE the destination tree, not copy
+        # inside it; the removal is guarded so a failure cannot abort the
+        # remaining recovery under set -e
+        if [[ -d "${bak}" && -d "${path}" ]]; then
+          rm -rf "${path}" || {
+            failed=$((failed + 1))
+            echo "install: rollback could not remove ${path}; backup at ${bak}" >&2
+            continue
+          }
+        fi
+        if cp -a "${bak}" "${path}"; then
+          restored=$((restored + 1))
+        else
+          failed=$((failed + 1))
+          echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
+        fi
+      else
+        failed=$((failed + 1))
+        echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
+      fi
+    fi
+  done
+  for path in "${CREATED[@]}"; do
+    if ! rm -rf "${path}"; then
+      echo "install: rollback could not remove created path ${path}" >&2
+    fi
+  done
+  echo "install: FAILED (exit ${rc}) after partial mutation; rolled back ${restored} replaced path(s), removed ${#CREATED[@]} created path(s)" >&2
+  echo "install: preflight backups retained at ${BACKUP_DIR} for manual recovery" >&2
+  exit "${rc}"
+}
+trap rollback_mutations EXIT
+
 # -- compute the complete AGENTS.md replacement BEFORE mutating anything --
 if [[ ! -e "${AGENTS_MD}" ]]; then
   mkdir -p "$(dirname "${AGENTS_MD}")"
@@ -173,52 +226,7 @@ else
   compute_mode="append"
 fi
 
-# -- mutate phase: track completed writes and roll back on failure. Every
-# replaced path that had a preflight backup is restored from it (recorded
-# as path|backup pairs); paths created fresh (no backup) are removed.
-# Surviving backups are always reported so manual recovery stays possible. --
-MUTATED=()   # path|backup pairs written during this run
-CREATED=()   # paths created fresh (no prior version to restore)
-
-rollback_mutations() {
-  local rc=$?
-  if [[ ${rc} -eq 0 ]]; then
-    trap - EXIT
-    return 0
-  fi
-  local restored=0 failed=0 pair path bak
-  for pair in "${MUTATED[@]}"; do
-    path="${pair%%|*}"
-    bak="${pair#*|}"
-    if [[ -e "${bak}" ]]; then
-      if mkdir -p "$(dirname "${path}")"; then
-        # a directory backup must REPLACE the destination tree, not copy
-        # inside it
-        if [[ -d "${bak}" && -d "${path}" ]]; then
-          rm -rf "${path}"
-        fi
-        if cp -a "${bak}" "${path}"; then
-          restored=$((restored + 1))
-        else
-          failed=$((failed + 1))
-          echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
-        fi
-      else
-        failed=$((failed + 1))
-        echo "install: rollback FAILED for ${path}; backup at ${bak}" >&2
-      fi
-    fi
-  done
-  for path in "${CREATED[@]}"; do
-    if ! rm -rf "${path}"; then
-      echo "install: rollback could not remove created path ${path}" >&2
-    fi
-  done
-  echo "install: FAILED (exit ${rc}) after partial mutation; rolled back ${restored} replaced path(s), removed ${#CREATED[@]} created path(s)" >&2
-  echo "install: preflight backups retained at ${BACKUP_DIR} for manual recovery" >&2
-  exit "${rc}"
-}
-trap rollback_mutations EXIT
+# -- mutate phase: track completed writes and roll back on failure --
 
 # -- mutate: skills (atomic same-directory replacement) --
 while IFS= read -r entry; do

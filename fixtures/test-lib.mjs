@@ -224,6 +224,65 @@ check("compound with multiple matched rules: single-operation evidence is never 
     "evidence binds one operation; the kill's unresolved PID is not covered"
   );
 });
+check("pkill -s/-n select sessions/newest, not signal 0: real mutations", () => {
+  for (const cmd of ["pkill -s 0 node", "pkill -n 0"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.kind, "lifecycle", `${cmd} sends the default signal`);
+  }
+  const probe = classifyCommand("pkill -0 node", policy);
+  assert.equal(probe.kind, "non-lifecycle", "pkill -0 IS a signal-zero probe");
+});
+check("executing substitution without a top-level executable still executes", () => {
+  const c = classifyCommand("$(kill 1)$(date)", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.lifecycleInside, true, "the substitution runs kill even with no top-level executable");
+});
+check("leading whitespace inside a substitution does not hide the command", () => {
+  const c = classifyCommand("echo $( kill 1)", policy);
+  assert.equal(c.lifecycleInside, true);
+});
+check("multiple commands inside one substitution: each command position checked", () => {
+  const c = classifyCommand("echo $(true; kill 1)", policy);
+  assert.equal(c.lifecycleInside, true, "kill 1 is the second command in the substitution");
+});
+check("nested-quote comment ambiguity never erases a later mutation", () => {
+  const c = classifyCommand('echo "$(echo " #")"; kill 1', policy);
+  assert.equal(c.kind, "uncertain");
+  assert.ok(c.ruleIds.includes("raw-process-kill"), "the kill mutation must be recognized, not erased");
+});
+check("backtick substitutions are separate commands", () => {
+  const c = classifyCommand("echo `true``kill 1`", policy);
+  assert.equal(c.lifecycleInside, true, "backtick contents must not concatenate");
+});
+check("unsupported compounds never verify with one binding", () => {
+  const vt = { target: "1", ruleId: "raw-process-kill", operation: "kill", evidence: "pid 1 resolved", resolved: true };
+  for (const cmd of ["kill 1; kill 2 3", "kill 1; kill 2 > log", "kill 1; kill $(pgrep node)"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(
+      targetConfidence({ classification: c, verifiedTarget: vt }),
+      "candidate",
+      `${cmd}: unresolved additional coverage must downgrade to candidate`
+    );
+  }
+});
+check("kill -- ends flags: negative PIDs are operands", () => {
+  const c = classifyCommand("kill -- -123 -456", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.multiTarget, true, "two negative PIDs after -- are two targets");
+});
+check("read/probe operations inside substitutions are not mutations", () => {
+  for (const cmd of ["echo $(systemctl status foo.service)", "echo $(kill -0 1)"]) {
+    const c = classifyCommand(cmd, policy);
+    assert.equal(c.lifecycleInside, false, `${cmd} runs a read/probe, not a mutation`);
+  }
+});
+check("read-verb redirect stays uncertain without an invented mutation", () => {
+  const c = classifyCommand("systemctl status foo.service 2>/dev/null", policy);
+  assert.equal(c.kind, "uncertain");
+  assert.equal(c.operationCount, 0, "a read verb with a redirect is not a lifecycle mutation");
+  const shadow = decide({ classification: c, confidence: "stale", mode: "shadow", policy });
+  assert.equal(shadow.action, "log-uncertainty", "no ownership hold without a recognized mutation");
+});
 check("multiline quoting: quoted # spanning lines is not a comment", () => {
   const c = classifyCommand("echo '\n#'; kill 1", policy);
   assert.equal(c.kind, "lifecycle", "the quoted # spans lines; kill 1 executes");

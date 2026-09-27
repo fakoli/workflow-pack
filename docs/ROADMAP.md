@@ -28,8 +28,8 @@ design.
 - Manifest: `policy.contract_version`, `policy.default_mode: shadow`,
   `policy.rules[]` (stable IDs, severity, eligibility), argv arrays,
   `registry_contract`, `ownership_contract`.
-- Deterministic pure tests: `node fixtures/test-lib.mjs` (119 checks,
-  including the adversarial regression corpus from four Astra review
+- Deterministic pure tests: `node fixtures/test-lib.mjs` (128 checks,
+  including the adversarial regression corpus from five Astra review
   rounds: executing substitutions, compound hard-rule ordering,
   operation-bound ownership evidence, integrity holds, object-shaped
   registry validation).
@@ -73,16 +73,10 @@ design.
 
 ## Next
 
-### 1. Enforce-mode guardrail (soft-deny tiers)
+Sequencing follows `docs/DESIGN-v0.3.md` (§Sequencing): fixture isolation
+and the behavioral baseline come BEFORE Pi enforcement.
 
-- Soft-deny: raw lifecycle commands when a managed verb family covers the
-  target — the deny reason names the managed alternative and its gate.
-- Hard-deny only destructive/irreversible operations.
-- Human-mediated one-shot override; never a model-writable marker.
-- JSONL audit of every decision and override; self-protection against
-  disabling the guardrail.
-
-### 2. Fixture isolation (sandboxed runner)
+### 1. Fixture isolation (sandboxed runner)
 
 - Run regression sessions in an isolated environment (container or synthetic
   CLI/service state) with no production authority, so an implementation
@@ -90,12 +84,21 @@ design.
   is the interim safeguard.
 - Keep this test isolation separate from any production guardrail.
 
-### 3. Behavioral trigger evaluation
+### 2. Behavioral trigger baseline
 
 - Score whether skill descriptions actually fire on realistic prompts,
   across models — not just lexical coverage.
 - Pin the model alias in fixture runs for reproducibility (the runner
   records the pi version, not the underlying model).
+
+### 3. Enforce-mode guardrail (soft-deny tiers)
+
+- Soft-deny: raw lifecycle commands when a managed verb family covers the
+  target — the deny reason names the managed alternative and its gate.
+- Hard-deny only destructive/irreversible operations.
+- Human-mediated one-shot override; never a model-writable marker.
+- JSONL audit of every decision and override; self-protection against
+  disabling the guardrail.
 
 ### 4. More runtimes
 
